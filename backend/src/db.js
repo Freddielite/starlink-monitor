@@ -2,20 +2,58 @@ import pg from "pg";
 
 const { Pool } = pg;
 
-// Render's managed Postgres requires SSL, but a plain local Postgres during
-// dev doesn't speak SSL at all and will hang if you ask for it. Detect
+// Any hosted Postgres requires SSL, but a plain local Postgres during dev
+// doesn't speak SSL at all and will hang if you ask for it. Detect
 // local-vs-hosted from the connection string itself so one config works
-// for both without an extra env var to keep in sync. (Inherited from
-// Pulse, unchanged - same deploy target, same problem.)
+// for both without an extra env var to keep in sync.
 const isLocal = /localhost|127\.0\.0\.1/.test(process.env.DATABASE_URL || "");
 
+// The backend runs on Render; the database is Supabase. Two things about
+// that pairing that aren't obvious and both fail in quiet ways:
+//
+// 1. Supabase's DIRECT connection host (db.<ref>.supabase.co) resolves
+//    to IPv6 only on projects created since early 2024. Render's egress
+//    is IPv4, so a direct connection string just times out on connect -
+//    with an error that reads like a firewall problem, not an address
+//    family problem. The pooler host (aws-0-<region>.pooler.supabase.com)
+//    is dual-stack and is what should be used from Render.
+//
+// 2. The pooler offers two modes on two ports, and the choice is not
+//    cosmetic. SESSION mode (5432) hands out a dedicated backend for the
+//    life of the connection. TRANSACTION mode (6543) can hand a
+//    different backend to every statement, which breaks anything
+//    session-scoped. This app deliberately relies on NO session state
+//    (see the cron_locks table below for the one place it used to), so
+//    either port works - but 5432 is the simpler default.
 export const pool = new Pool({
   connectionString: process.env.DATABASE_URL,
   ssl: isLocal ? false : { rejectUnauthorized: false },
+  // Supabase's pooler closes idle client connections on its own, and the
+  // free tier's connection budget is shared across everything touching
+  // the project. Ten is plenty for this workload (the heaviest thing it
+  // does is a sweep over a few hundred rows) and leaves headroom for
+  // the Supabase dashboard and any SQL console sitting open.
+  max: Number(process.env.PG_POOL_MAX) || 10,
+  idleTimeoutMillis: 30000,
+  connectionTimeoutMillis: 10000,
+});
+
+// An idle pooled client dropped by the far end emits 'error' on the pool.
+// Without a listener that's an unhandled error event, which takes the
+// whole process down - so a routine, expected disconnect would read in
+// the Render logs as a crash. Logged and swallowed: node-postgres
+// discards the broken client and the next query gets a fresh one.
+pool.on("error", (err) => {
+  console.error("Idle Postgres client error (connection was dropped, pool will recover):", err.message);
 });
 
 export async function migrate() {
   await pool.query(`
+    -- Supabase ships pgcrypto pre-installed (in the 'extensions'
+    -- schema), so this is a no-op there rather than a privilege problem:
+    -- IF NOT EXISTS matches on the extension name regardless of which
+    -- schema it lives in. Kept anyway so a plain self-hosted Postgres
+    -- still works from a blank database.
     CREATE EXTENSION IF NOT EXISTS pgcrypto;
 
     -- ===================================================================
@@ -378,6 +416,35 @@ export async function migrate() {
     -- obstruction and throughput over time, and so "it was fine until
     -- Tuesday" is answerable after the fact. Pruned on a cadence rather
     -- than kept forever - see pruneHeartbeats() in lib/sweeps.js.
+    -- Lease-based lock for the cron tick, replacing the session-scoped
+    -- pg_advisory_lock this used to hold.
+    --
+    -- The advisory lock was correct against a directly-connected
+    -- Postgres and silently wrong behind a connection pooler in
+    -- transaction mode: the acquire and the release are two separate
+    -- statements, and transaction pooling is free to run them on
+    -- different backend connections. The release would then no-op
+    -- against a connection that never held anything, leaving the lock
+    -- held forever on the original backend - so every subsequent tick
+    -- would answer {"skipped": true} and nothing would ever sweep again,
+    -- with no error anywhere to explain it.
+    --
+    -- A row with an expiry is immune to all of that: acquiring is one
+    -- atomic statement (see routes/cron.js), it doesn't care which
+    -- backend runs it, and a tick that dies mid-run frees the lock when
+    -- its lease runs out rather than wedging the app. The cost versus an
+    -- advisory lock is that crash recovery takes until the lease expires
+    -- instead of being instant on disconnect - acceptable when ticks run
+    -- every few minutes and finish in seconds.
+    CREATE TABLE IF NOT EXISTS cron_locks (
+      name        TEXT PRIMARY KEY,
+      held_until  TIMESTAMPTZ NOT NULL,
+      -- Identifies the run holding the lease, so a tick that overran its
+      -- lease can't release a lock a different instance has since
+      -- legitimately taken.
+      holder      TEXT
+    );
+
     CREATE TABLE IF NOT EXISTS heartbeats (
       id              UUID PRIMARY KEY DEFAULT gen_random_uuid(),
       kit_id          UUID NOT NULL REFERENCES kits(id) ON DELETE CASCADE,

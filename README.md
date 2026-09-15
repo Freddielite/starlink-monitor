@@ -127,7 +127,9 @@ marking that client as paid is not.
 
 ## Stack
 
-- **Backend**: Node/Express + PostgreSQL, deploys to Render.
+- **Backend**: Node/Express on Render.
+- **Database**: Supabase Postgres, reached through their connection
+  pooler (Render's egress is IPv4; Supabase's direct host is IPv6-only).
 - **Frontend**: React + Vite + Leaflet, deploys to Vercel. Installable
   PWA with offline fallback, push, and an app-icon badge.
 - **No background job runner** - everything scheduled happens through one
@@ -159,6 +161,7 @@ cd backend
 npm install
 # create backend/.env with:
 #   DATABASE_URL=postgresql://user:pass@localhost:5432/slm_dev
+#   (or a Supabase pooler string - see backend/.env.example)
 #   SESSION_SECRET=any-random-string
 #   NODE_ENV=development
 #   PORT=4000

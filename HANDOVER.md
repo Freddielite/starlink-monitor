@@ -1,7 +1,7 @@
 # Starlink Monitor: Handover
 
 Payment, hardware and usage tracking for Starlink kits across clients.
-Backend: Node/Express + Postgres, deploys to Render.
+Backend: Node/Express on Render. Database: Supabase Postgres.
 Frontend: React/Vite + Leaflet, deploys to Vercel.
 
 ## The one thing that makes this work
@@ -29,7 +29,8 @@ than your tick interval, because nothing notices a missing heartbeat
 between ticks. If you set a kit to 20 minutes, tick at 5-10.
 
 Being an inbound request, the tick also keeps Render's free tier from
-spinning the backend down - same side benefit Pulse relied on.
+spinning the backend down - same side benefit Pulse relied on - and its
+queries keep the Supabase project from idling out.
 
 ## Environment variables
 
@@ -37,7 +38,8 @@ spinning the backend down - same side benefit Pulse relied on.
 
 | Variable | Required | Notes |
 |---|---|---|
-| `DATABASE_URL` | Yes | Render Postgres connection string |
+| `DATABASE_URL` | Yes | Supabase **pooler** connection string - see "Connecting Render to Supabase" below. Not the direct `db.<ref>.supabase.co` one |
+| `PG_POOL_MAX` | Optional | Connection pool ceiling, default 10 |
 | `SESSION_SECRET` | Yes | Random string, generate your own |
 | `CORS_ORIGIN` | Yes | Your Vercel frontend URL, exact match |
 | `NODE_ENV` | Yes | `production` |
@@ -58,17 +60,44 @@ spinning the backend down - same side benefit Pulse relied on.
 
 ## Deploying
 
-1. **Backend on Render**: new Web Service from `backend/`, build
-   `npm install`, start `npm start`. Add a Render Postgres instance and
-   wire `DATABASE_URL`. Set the rest above.
-2. **Frontend on Vercel**: import `frontend/`, framework preset Vite. Set
+1. **Database on Supabase**: create a project. Nothing to set up beyond
+   that - the schema is created on the backend's first boot, and
+   `pgcrypto` is already installed. Copy the **Session pooler**
+   connection string from Project Settings > Database.
+2. **Backend on Render**: new Web Service from `backend/`, build
+   `npm install`, start `npm start`. Set `DATABASE_URL` to the Supabase
+   pooler string and the rest of the variables above.
+3. **Frontend on Vercel**: import `frontend/`, framework preset Vite. Set
    `VITE_API_URL`.
-3. Once both are live, set `CORS_ORIGIN` to the real Vercel URL (not
+4. Once all three are live, set `CORS_ORIGIN` to the real Vercel URL (not
    `*`) and redeploy.
-4. Sign up through the deployed frontend (with `SIGNUP_CODE` if set).
-5. Set up the external cron. **The app does nothing scheduled without
+5. Sign up through the deployed frontend (with `SIGNUP_CODE` if set).
+6. Set up the external cron. **The app does nothing scheduled without
    it** - states won't advance and no alert will ever fire.
-6. In Settings, turn on push and send yourself a test.
+7. In Settings, turn on push and send yourself a test.
+
+## Connecting Render to Supabase
+
+Two things about this pairing fail in quiet ways, so both are worth
+getting right the first time.
+
+**Use a pooler connection string, not the direct one.** Supabase's direct
+host (`db.<ref>.supabase.co`) resolves to IPv6 only on projects created
+since early 2024. Render's egress is IPv4. A direct string doesn't error
+clearly - it hangs and times out on connect, with a message that reads
+like a firewall problem rather than an address-family one. The pooler
+host (`aws-0-<region>.pooler.supabase.com`) is dual-stack.
+
+**Either pooler mode works.** Session (5432) and Transaction (6543) are
+both fine for this app, because nothing in it depends on session state -
+`src/db.js` uses no prepared statements and the cron lock is a table row,
+not an advisory lock. Session mode is the simpler default. See the
+`cron_locks` note below for why that matters.
+
+**Supabase's free tier pauses a project after a week of inactivity.**
+That's genuinely unlikely here given the cron tick queries it every few
+minutes, but it's worth knowing that the tick is what keeps the database
+awake as well as the Render service.
 
 ## Decisions made, and why
 
@@ -133,6 +162,16 @@ have produced a map quietly full of city centroids.
   per tick so switching it on for an existing database can't turn one
   tick into a long-running job. The current values always live on the kit
   row regardless.
+- **The cron lock is a table row with an expiry, not an advisory lock.**
+  It started as `pg_advisory_lock`, which is correct against a directly
+  connected Postgres and silently wrong behind a transaction-mode pooler:
+  acquire and release are separate statements and may land on different
+  backend connections, so the release no-ops and the lock is held forever
+  - every later tick answers `{"skipped": true}` and nothing ever sweeps
+  again, with no error to explain it. The replacement (`cron_locks`) is
+  one atomic upsert and doesn't care which connection runs it. The
+  trade-off is that a tick killed mid-run holds the lock until its
+  10-minute lease expires, instead of releasing instantly on disconnect.
 - **Org-level custom domain is a note to yourself, not a feature.**
   Carried over from Pulse: the field records what you'd need to set up
   (a CNAME plus host routing/TLS), it doesn't do any of it.
@@ -148,6 +187,7 @@ have produced a map quietly full of city centroids.
   did it rather than a person, which is the distinction people actually
   ask about when reviewing a disputed change.
 - `heartbeats` - raw agent reports, pruned on a cadence.
+- `cron_locks` - one row, leased, stops overlapping ticks. See above.
 - `users` / `organizations` / `organization_members` / `org_audit_log` /
   `api_tokens` / `push_subscriptions` / `pending_signups` /
   `auth_attempts` - carried over from Pulse.
@@ -179,6 +219,19 @@ Run against a real Postgres during the build, end to end:
   empty list that would read as "no such address".
 - Unauthenticated `GET /api/kits` → 401.
 
+Re-run against a **transaction-mode pgbouncer** (standing in for
+Supabase's pooler), since that's the configuration that broke the
+original locking:
+
+- Full create → overdue → payment → agent heartbeat flow, unchanged.
+- A live lease held by another run → tick returns `skipped`, and the
+  other run's lock is left intact.
+- An expired lease (i.e. a crashed run) → reclaimed, sweeps ran.
+- A stale run attempting to release a lock a second instance now holds →
+  refused by the holder guard.
+
 Not verified here: live email/push/Telegram/webhook delivery (needs real
-credentials), and a successful Nominatim lookup (the build sandbox
-blocks outbound requests to it - the failure path was exercised instead).
+credentials), a successful Nominatim lookup (the build sandbox blocks
+outbound requests to it - the failure path was exercised instead), and a
+connection to a real Supabase instance (tested against local Postgres
+both directly and through pgbouncer instead).
