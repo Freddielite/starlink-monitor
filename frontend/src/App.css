@@ -1,0 +1,1970 @@
+:root {
+  /* Signal palette: dark, slightly green-tinted graphite (not pure black)
+     with a single true signal-green as the "alive" color. Red and amber
+     are reserved strictly for down / expiring states, never decoration,
+     so their appearance always means something. */
+  --bg: #0a0f0d;
+  --bg-alt: #0e1512;
+  --panel: rgba(255, 255, 255, 0.03);
+  --panel-border: rgba(255, 255, 255, 0.08);
+  --ink: #e7f2ec;
+  --ink-dim: #7d938c;
+  --ink-faint: #4d5f59;
+  --signal: #3ddc84;
+  --signal-dim: rgba(61, 220, 132, 0.15);
+  --alert: #ff5d5d;
+  --alert-dim: rgba(255, 93, 93, 0.15);
+  --amber: #ffb84d;
+  --amber-dim: rgba(255, 184, 77, 0.15);
+  --font-display: "Space Grotesk", sans-serif;
+  --font-body: "Inter", sans-serif;
+  --font-mono: "IBM Plex Mono", monospace;
+  --radius: 14px;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html,
+body,
+#root {
+  height: 100%;
+}
+
+/* Safety net: a flex row somewhere with unwrapped, unshrinkable content
+   (missing flex-wrap or min-width: 0 on a child) will always eventually
+   sneak back in - see the comments on .sl-detail-head and
+   .sl-incident-row for two we already hit. Rather than let that push
+   the whole page into horizontal scroll again, clip it here so the
+   symptom is "one element looks cramped" instead of "the entire mobile
+   layout shifts and everything reads as cut off." */
+html,
+body {
+  overflow-x: hidden;
+  /* Kills the iOS/Android rubber-band bounce at the top/bottom of the
+     page - one of the more obvious "this is a website" tells on
+     mobile. Native apps don't rubber-band the whole screen. */
+  overscroll-behavior-y: contain;
+}
+
+body {
+  margin: 0;
+  background: radial-gradient(ellipse at top, var(--bg-alt), var(--bg) 60%);
+  color: var(--ink);
+  font-family: var(--font-body);
+  -webkit-font-smoothing: antialiased;
+}
+
+/* Native-app feel on mobile: block long-press text selection / copy
+   everywhere by default, the way a real installed app behaves, and
+   only re-enable it inside actual inputs/textareas where people
+   legitimately need to select and copy what they typed. Also kill the
+   iOS "callout" (the popup with Copy/Look Up/Share on long-press) on
+   everything else, since disabling selection alone doesn't stop it. */
+html,
+body,
+#root {
+  -webkit-user-select: none;
+  -moz-user-select: none;
+  user-select: none;
+  -webkit-touch-callout: none;
+  /* Belt-and-braces for the viewport meta tag: stops double-tap-to-zoom
+     on browsers that don't fully honor user-scalable=no on its own. */
+  touch-action: manipulation;
+}
+
+input,
+textarea,
+[contenteditable="true"],
+.sl-selectable {
+  -webkit-user-select: text;
+  -moz-user-select: text;
+  user-select: text;
+  -webkit-touch-callout: default;
+}
+
+button,
+input,
+select {
+  font-family: inherit;
+  color: inherit;
+}
+
+a {
+  color: var(--signal);
+}
+
+::selection {
+  background: var(--signal-dim);
+}
+
+/* ---------- Layout ---------- */
+
+.sl-shell {
+  max-width: 920px;
+  margin: 0 auto;
+  padding: 28px 20px 80px;
+  padding-top: max(28px, env(safe-area-inset-top));
+  padding-left: max(20px, env(safe-area-inset-left));
+  padding-right: max(20px, env(safe-area-inset-right));
+}
+
+/* When the bottom tab bar is present (mobile), the shell needs extra
+   clearance so the last bit of scrollable content isn't hidden behind
+   it - the tab bar's own rendered height (icon + label + its internal
+   padding, roughly 60-85px depending on device) plus genuine breathing
+   room above it, not just enough to technically clear it. */
+.sl-shell--with-tabbar {
+  padding-bottom: calc(112px + env(safe-area-inset-bottom));
+}
+
+.sl-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  margin-bottom: 8px;
+}
+
+.sl-brand {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  font-family: var(--font-display);
+  font-weight: 700;
+  font-size: 20px;
+  letter-spacing: -0.01em;
+}
+
+.sl-brand__mark {
+  width: 26px;
+  height: 26px;
+  flex-shrink: 0;
+}
+
+.sl-nav {
+  display: flex;
+  gap: 4px;
+}
+
+.sl-nav button {
+  background: none;
+  border: none;
+  color: var(--ink-dim);
+  font-size: 13.5px;
+  font-weight: 500;
+  padding: 8px 12px;
+  border-radius: 8px;
+  cursor: pointer;
+  transition: color 0.15s ease, background 0.15s ease;
+}
+
+.sl-nav button:hover {
+  color: var(--ink);
+  background: var(--panel);
+}
+
+.sl-nav button.active {
+  color: var(--signal);
+  background: var(--signal-dim);
+}
+
+/* ---------- Bottom tab bar (mobile) ---------- */
+
+.sl-tabbar {
+  position: fixed;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  z-index: 100;
+  display: flex;
+  justify-content: space-around;
+  background: rgba(14, 21, 18, 0.92);
+  backdrop-filter: blur(14px);
+  -webkit-backdrop-filter: blur(14px);
+  border-top: 1px solid var(--panel-border);
+  padding: 8px 8px max(8px, env(safe-area-inset-bottom));
+}
+
+.sl-tabbar button {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 4px;
+  background: none;
+  border: none;
+  color: var(--ink-faint);
+  font-family: inherit;
+  font-size: 10.5px;
+  font-weight: 500;
+  padding: 4px 4px 2px;
+  cursor: pointer;
+  transition: color 0.15s ease, transform 0.12s ease;
+}
+
+.sl-tabbar button svg {
+  width: 22px;
+  height: 22px;
+  stroke: currentColor;
+}
+
+.sl-tabbar button.active {
+  color: var(--signal);
+}
+
+/* Physical, native-feeling press: the icon+label compress slightly on
+   tap rather than nothing visibly happening until the view changes. */
+.sl-tabbar button:active {
+  transform: scale(0.92);
+}
+
+/* ---------- Page transitions ---------- */
+
+.sl-page {
+  animation-duration: 0.32s;
+  animation-timing-function: cubic-bezier(0.22, 0.8, 0.28, 1);
+  animation-fill-mode: both;
+}
+
+/* Selecting a monitor - pushing a level deeper, like a native
+   navigation stack. */
+.sl-page--push {
+  animation-name: sl-slide-in-right;
+}
+
+/* Backing out of a monitor's detail view - the reverse of push. */
+.sl-page--pop {
+  animation-name: sl-slide-in-left;
+}
+
+/* Switching top-level tabs (Monitors / Status pages / Settings) isn't
+   a stack push/pop, so it gets its own, more neutral motion instead
+   of implying a direction that isn't really there. */
+.sl-page--tab {
+  animation-name: sl-fade-up;
+}
+
+@keyframes sl-slide-in-right {
+  from {
+    opacity: 0;
+    transform: translateX(28px);
+  }
+  to {
+    opacity: 1;
+    transform: translateX(0);
+  }
+}
+@keyframes sl-slide-in-left {
+  from {
+    opacity: 0;
+    transform: translateX(-28px);
+  }
+  to {
+    opacity: 1;
+    transform: translateX(0);
+  }
+}
+@keyframes sl-fade-up {
+  from {
+    opacity: 0;
+    transform: translateY(8px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .sl-page {
+    animation: none !important;
+  }
+}
+
+/* ---------- Install prompt banner ---------- */
+
+.sl-install-banner {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 14px 16px;
+  margin-bottom: 16px;
+  position: relative;
+}
+
+.sl-install-banner__icon {
+  width: 34px;
+  height: 34px;
+  flex-shrink: 0;
+  border-radius: 8px;
+}
+
+.sl-install-banner__text {
+  flex: 1;
+  min-width: 0;
+}
+
+.sl-install-banner__title {
+  font-weight: 600;
+  font-size: 13.5px;
+}
+
+.sl-install-banner__desc {
+  font-size: 11.5px;
+  color: var(--ink-dim);
+  margin-top: 2px;
+}
+
+.sl-install-banner__close {
+  background: none;
+  border: none;
+  color: var(--ink-faint);
+  padding: 4px;
+  cursor: pointer;
+  flex-shrink: 0;
+}
+
+.sl-install-banner__close svg {
+  width: 16px;
+  height: 16px;
+}
+
+/* ---------- Swipe-to-reveal row actions (monitor cards) ---------- */
+
+.sl-swipe-row {
+  position: relative;
+  overflow: hidden;
+  border-radius: var(--radius);
+  /* Opaque backer so the action colors underneath don't tint through
+     the monitor card's own near-transparent panel background before
+     it's actually been swiped open. */
+  background: var(--bg-alt);
+}
+
+.sl-swipe-row__actions {
+  position: absolute;
+  top: 0;
+  right: 0;
+  bottom: 0;
+  display: flex;
+  z-index: 1;
+}
+
+.sl-swipe-action {
+  width: 76px;
+  border: none;
+  font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
+  padding: 0 8px;
+  text-align: center;
+}
+
+.sl-swipe-action--snooze {
+  background: var(--amber);
+  color: #241a05;
+}
+
+.sl-swipe-action--delete {
+  background: var(--alert);
+  color: #1a0505;
+}
+
+/* Whichever action ends up rightmost gets the matching corner radius -
+   keyed off position, not color, so this still holds if the action
+   order ever changes. */
+.sl-swipe-row__actions > button:last-child {
+  border-top-right-radius: var(--radius);
+  border-bottom-right-radius: var(--radius);
+}
+
+.sl-swipe-row__content {
+  position: relative;
+  z-index: 2;
+  display: block;
+  width: 100%;
+  /* Explicit opaque background, not just relying on the card's own
+     near-transparent panel fill, so the actions layer underneath is
+     fully hidden at rest regardless of paint-order edge cases. No
+     will-change/border-radius here - the outer .sl-swipe-row is the
+     single source of truth for the rounded clip; giving this layer
+     its own border-radius on top of a transformed compositing layer
+     is what was producing the corner seam.
+  */
+  background: var(--bg-alt);
+}
+
+/* ---------- Pull to refresh ---------- */
+
+.sl-ptr-indicator {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  overflow: hidden;
+}
+
+.sl-ptr-spinner {
+  width: 20px;
+  height: 20px;
+  border: 2px solid var(--panel-border);
+  border-top-color: var(--signal);
+  border-radius: 50%;
+}
+
+.sl-ptr-spinner--spin {
+  animation: sl-spin 0.7s linear infinite;
+}
+
+@keyframes sl-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .sl-ptr-spinner--spin {
+    animation: none !important;
+  }
+}
+
+/* ---------- Skeleton loaders ---------- */
+
+.sl-skeleton {
+  position: relative;
+  overflow: hidden;
+  background: var(--panel);
+  border-radius: 6px;
+}
+
+.sl-skeleton::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  transform: translateX(-100%);
+  background: linear-gradient(90deg, transparent, rgba(255, 255, 255, 0.06), transparent);
+  animation: sl-shimmer 1.4s ease-in-out infinite;
+}
+
+@keyframes sl-shimmer {
+  100% {
+    transform: translateX(100%);
+  }
+}
+
+.sl-skeleton-card {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  padding: 16px 18px;
+}
+
+.sl-skeleton-card__dot {
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  flex-shrink: 0;
+}
+
+.sl-skeleton-card__lines {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .sl-skeleton::after {
+    animation: none !important;
+  }
+}
+
+/* Signature element: a signal-arc sweep, used sparingly as a
+   section divider and as the idle animation on the "up" status dot -
+   both places tie directly back to what the app actually does. */
+.sl-signalline {
+  width: 100%;
+  height: 28px;
+  margin: 18px 0 26px;
+  opacity: 0.55;
+}
+
+.sl-signalline path {
+  fill: none;
+  stroke: var(--signal);
+  stroke-width: 1.5;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+
+@media (prefers-reduced-motion: no-preference) {
+  .sl-signalline path {
+    stroke-dasharray: 300;
+    stroke-dashoffset: 300;
+    animation: sl-draw 2.6s ease-in-out infinite;
+  }
+}
+
+@keyframes sl-draw {
+  0% {
+    stroke-dashoffset: 300;
+  }
+  60% {
+    stroke-dashoffset: 0;
+  }
+  100% {
+    stroke-dashoffset: -300;
+  }
+}
+
+/* ---------- Panels & cards ---------- */
+
+.sl-panel {
+  background: var(--panel);
+  border: 1px solid var(--panel-border);
+  border-radius: var(--radius);
+  padding: 18px;
+}
+
+.sl-monitor-grid {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.sl-dashboard-toolbar {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 16px;
+  margin-bottom: 18px;
+}
+
+.sl-dashboard-stats {
+  display: flex;
+  gap: 24px;
+}
+
+.sl-dashboard-actions {
+  display: flex;
+  gap: 8px;
+  flex-shrink: 0;
+}
+
+.sl-monitor-card {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  padding: 16px 18px;
+  cursor: pointer;
+  transition: border-color 0.15s ease, transform 0.15s ease;
+}
+
+.sl-monitor-card:hover {
+  border-color: rgba(255, 255, 255, 0.16);
+  transform: translateY(-1px);
+}
+
+.sl-status-dot {
+  width: 11px;
+  height: 11px;
+  border-radius: 50%;
+  flex-shrink: 0;
+  background: var(--ink-faint);
+}
+
+.sl-status-dot--up {
+  background: var(--signal);
+  box-shadow: 0 0 0 0 var(--signal-dim);
+  animation: sl-pulse-dot 2s ease-in-out infinite;
+}
+
+.sl-status-dot--degraded {
+  background: var(--amber);
+  box-shadow: 0 0 0 0 var(--amber-dim);
+  animation: sl-pulse-dot-amber 2s ease-in-out infinite;
+}
+
+.sl-status-dot--down {
+  background: var(--alert);
+}
+
+@keyframes sl-pulse-dot-amber {
+  0% {
+    box-shadow: 0 0 0 0 rgba(255, 184, 77, 0.45);
+  }
+  70% {
+    box-shadow: 0 0 0 8px rgba(255, 184, 77, 0);
+  }
+  100% {
+    box-shadow: 0 0 0 0 rgba(255, 184, 77, 0);
+  }
+}
+
+@keyframes sl-pulse-dot {
+  0% {
+    box-shadow: 0 0 0 0 rgba(61, 220, 132, 0.45);
+  }
+  70% {
+    box-shadow: 0 0 0 8px rgba(61, 220, 132, 0);
+  }
+  100% {
+    box-shadow: 0 0 0 0 rgba(61, 220, 132, 0);
+  }
+}
+
+.sl-monitor-card__main {
+  flex: 1;
+  min-width: 0;
+}
+
+.sl-monitor-card__name {
+  font-weight: 600;
+  font-size: 14.5px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.sl-monitor-card__url {
+  font-family: var(--font-mono);
+  font-size: 11.5px;
+  color: var(--ink-dim);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.sl-monitor-card__stats {
+  display: flex;
+  align-items: center;
+  gap: 18px;
+  flex-shrink: 0;
+}
+
+.sl-status-page-row__stats {
+  gap: 16px;
+  flex-shrink: 0;
+}
+
+.sl-stat {
+  text-align: right;
+}
+
+.sl-stat__value {
+  font-family: var(--font-mono);
+  font-size: 13px;
+  font-weight: 500;
+}
+
+.sl-stat__label {
+  font-size: 10px;
+  color: var(--ink-faint);
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+}
+
+.sl-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 3px 8px;
+  border-radius: 20px;
+  font-size: 10.5px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+.sl-badge--amber {
+  background: var(--amber-dim);
+  color: var(--amber);
+}
+
+.sl-badge--signal {
+  background: var(--signal-dim);
+  color: var(--signal);
+}
+
+.sl-badge--muted {
+  background: rgba(255, 255, 255, 0.08);
+  color: var(--ink-dim);
+}
+
+/* ---------- Forms ---------- */
+
+.sl-field {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin-bottom: 14px;
+}
+
+.sl-field label {
+  font-size: 12px;
+  color: var(--ink-dim);
+}
+
+.sl-field input,
+.sl-field select,
+.sl-field textarea {
+  width: 100%;
+  min-width: 0;
+  background: rgba(255, 255, 255, 0.04);
+  border: 1px solid var(--panel-border);
+  border-radius: 9px;
+  padding: 10px 12px;
+  font-size: 14px;
+  outline: none;
+  transition: border-color 0.15s ease;
+  font-family: inherit;
+  resize: vertical;
+}
+
+.sl-field input:focus,
+.sl-field select:focus,
+.sl-field textarea:focus {
+  border-color: var(--signal);
+}
+
+/* The rule above is a descendant selector, so it was also catching any
+   checkbox/radio nested inside a .sl-field (e.g. the monitor checklist
+   in StatusPageForm) - width: 100% and 10px/12px padding turned each
+   checkbox into a large invisible stretched box with the native tick
+   rendered off in a corner of it, shoving its label far to the right
+   instead of sitting right next to it. Reset those two input types back
+   to their normal small inline size rather than the text-field styling
+   above. */
+.sl-field input[type="checkbox"],
+.sl-field input[type="radio"] {
+  width: auto;
+  flex-shrink: 0;
+  padding: 0;
+  background: none;
+  border: none;
+  accent-color: var(--signal);
+}
+
+.sl-field-row {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 12px;
+}
+
+/* ---------- Custom dropdown (replaces native <select>) ---------- */
+
+.sl-dropdown {
+  position: relative;
+  width: 100%;
+}
+
+.sl-dropdown__trigger {
+  width: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  background: rgba(255, 255, 255, 0.04);
+  border: 1px solid var(--panel-border);
+  border-radius: 9px;
+  padding: 10px 12px;
+  font-size: 14px;
+  font-family: inherit;
+  color: var(--ink);
+  cursor: pointer;
+  transition: border-color 0.15s ease;
+  text-align: left;
+}
+
+.sl-dropdown__trigger:hover {
+  border-color: rgba(255, 255, 255, 0.16);
+}
+
+.sl-dropdown__trigger[aria-expanded="true"] {
+  border-color: var(--signal);
+}
+
+.sl-dropdown__chevron {
+  color: var(--ink-faint);
+  flex-shrink: 0;
+  transition: transform 0.15s ease;
+}
+
+.sl-dropdown__trigger[aria-expanded="true"] .sl-dropdown__chevron {
+  transform: rotate(180deg);
+  color: var(--signal);
+}
+
+.sl-dropdown__menu {
+  position: absolute;
+  top: calc(100% + 6px);
+  left: 0;
+  right: 0;
+  z-index: 40;
+  background: var(--bg-alt);
+  border: 1px solid var(--panel-border);
+  border-radius: 9px;
+  padding: 4px;
+  margin: 0;
+  max-height: 240px;
+  overflow-y: auto;
+  box-shadow: 0 12px 30px -10px rgba(0, 0, 0, 0.6);
+  list-style: none;
+}
+
+.sl-dropdown__option {
+  padding: 9px 10px;
+  border-radius: 6px;
+  font-size: 13.5px;
+  color: var(--ink-dim);
+  cursor: pointer;
+}
+
+.sl-dropdown__option:hover {
+  background: rgba(255, 255, 255, 0.06);
+  color: var(--ink);
+}
+
+.sl-dropdown__option.is-selected {
+  color: var(--signal);
+  background: var(--signal-dim);
+}
+
+.sl-checkbox-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 13px;
+  color: var(--ink-dim);
+  cursor: pointer;
+}
+
+.sl-checkbox-row input {
+  width: 15px;
+  height: 15px;
+  accent-color: var(--signal);
+}
+
+.sl-toggle-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 12px;
+  font-size: 13px;
+  color: var(--ink-dim);
+  margin-bottom: 16px;
+}
+
+.sl-btn {
+  background: var(--signal);
+  color: #06110b;
+  border: none;
+  border-radius: 9px;
+  padding: 10px 18px;
+  font-size: 13.5px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: transform 0.15s ease, box-shadow 0.15s ease;
+}
+
+.sl-btn:hover {
+  transform: translateY(-1px);
+  box-shadow: 0 8px 20px -8px rgba(61, 220, 132, 0.5);
+}
+
+.sl-btn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+  transform: none;
+  box-shadow: none;
+}
+
+.sl-btn--ghost {
+  background: none;
+  border: 1px solid var(--panel-border);
+  color: var(--ink);
+}
+
+.sl-btn--ghost:hover {
+  box-shadow: none;
+  border-color: rgba(255, 255, 255, 0.24);
+}
+
+.sl-btn--danger {
+  background: var(--alert);
+  color: #1a0505;
+}
+
+.sl-btn--danger:hover {
+  box-shadow: 0 8px 20px -8px rgba(255, 93, 93, 0.5);
+}
+
+.sl-btn--sm {
+  padding: 7px 13px;
+  font-size: 12.5px;
+}
+
+.sl-error {
+  color: var(--alert);
+  font-size: 12.5px;
+  margin: -4px 0 12px;
+}
+
+.sl-empty {
+  text-align: center;
+  padding: 60px 20px;
+  color: var(--ink-dim);
+}
+
+.sl-empty__title {
+  font-family: var(--font-display);
+  font-size: 17px;
+  color: var(--ink);
+  margin-bottom: 6px;
+}
+
+/* ---------- Overlay / modal ---------- */
+
+.sl-overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(4, 8, 6, 0.7);
+  backdrop-filter: blur(4px);
+  display: flex;
+  align-items: flex-start;
+  justify-content: center;
+  padding: 60px 20px;
+  z-index: 40;
+  overflow-y: auto;
+  /* Without this, scrolling the modal to its top/bottom edge chains the
+     remaining scroll delta to whatever's behind it - the page underneath,
+     since this overlay covers it but isn't itself the document root. Same
+     fix, same reasoning as overscroll-behavior-y: contain on html/body
+     above; this just needs its own copy because it's a separate scroll
+     container. */
+  overscroll-behavior: contain;
+  /* Same easing as .sl-page's transitions (App.css) - one motion
+     language across the app rather than every animated thing picking
+     its own curve. Enter is a touch slower than exit: arriving should
+     feel deliberate, leaving should feel quick and out of the way. See
+     ModalOverlay.jsx for why closing needs its own lingering-mount
+     logic rather than this class alone being enough. */
+  animation: sl-overlay-in 0.22s cubic-bezier(0.22, 0.8, 0.28, 1) both;
+}
+
+.sl-overlay--closing {
+  animation: sl-overlay-out 0.18s cubic-bezier(0.22, 0.8, 0.28, 1) both;
+}
+
+@keyframes sl-overlay-in {
+  from {
+    opacity: 0;
+  }
+}
+
+@keyframes sl-overlay-out {
+  to {
+    opacity: 0;
+  }
+}
+
+.sl-modal {
+  background: var(--bg-alt);
+  border: 1px solid var(--panel-border);
+  border-radius: 18px;
+  padding: 24px;
+  width: 100%;
+  max-width: 480px;
+  animation: sl-modal-in 0.22s cubic-bezier(0.22, 0.8, 0.28, 1) both;
+}
+
+/* Driven by the parent .sl-overlay's class rather than needing its own
+   modifier class - one class flip on the overlay animates both layers
+   together instead of every caller having to thread a "closing" flag
+   down to its own modal panel too. */
+.sl-overlay--closing .sl-modal {
+  animation: sl-modal-out 0.18s cubic-bezier(0.22, 0.8, 0.28, 1) both;
+}
+
+@keyframes sl-modal-in {
+  from {
+    opacity: 0;
+    transform: scale(0.96) translateY(8px);
+  }
+}
+
+@keyframes sl-modal-out {
+  to {
+    opacity: 0;
+    transform: scale(0.96) translateY(8px);
+  }
+}
+
+.sl-modal__title {
+  font-family: var(--font-display);
+  font-weight: 600;
+  font-size: 18px;
+  margin: 0 0 16px;
+}
+
+.sl-modal__actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 10px;
+  margin-top: 6px;
+}
+
+/* ---------- Auth screen ---------- */
+
+.sl-auth {
+  min-height: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 20px;
+}
+
+.sl-auth__card {
+  width: 100%;
+  max-width: 380px;
+  padding: 32px 28px;
+}
+
+.sl-auth__brand {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  font-family: var(--font-display);
+  font-weight: 700;
+  font-size: 22px;
+  margin-bottom: 4px;
+}
+
+.sl-auth__tagline {
+  color: var(--ink-dim);
+  font-size: 13px;
+  margin-bottom: 22px;
+}
+
+.sl-auth__switch {
+  margin-top: 16px;
+  font-size: 12.5px;
+  color: var(--ink-dim);
+  text-align: center;
+}
+
+.sl-auth__switch button {
+  background: none;
+  border: none;
+  color: var(--signal);
+  cursor: pointer;
+  font-size: inherit;
+  padding: 0;
+}
+
+/* ---------- Detail view ---------- */
+
+.sl-detail-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 6px;
+  flex-wrap: wrap;
+}
+
+/* The name/URL side needs min-width: 0 to actually be allowed to shrink
+   below its content's natural width - without it, a flex item defaults
+   to min-width: auto, so a long name (or, on a multi-step monitor, the
+   name plus the "multi-step" badge on the same line) just pushes the
+   whole row - and with it the whole page - into horizontal scroll on a
+   narrow screen instead of wrapping. */
+.sl-detail-head > div:first-child {
+  min-width: 0;
+  flex: 1 1 240px;
+}
+
+.sl-detail-title {
+  font-family: var(--font-display);
+  font-weight: 600;
+  font-size: 22px;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  overflow-wrap: break-word;
+}
+
+.sl-detail-url {
+  font-family: var(--font-mono);
+  font-size: 12.5px;
+  color: var(--ink-dim);
+  word-break: break-all;
+}
+
+.sl-uptime-grid {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 10px;
+  margin: 18px 0;
+}
+
+.sl-uptime-cell {
+  padding: 14px;
+  text-align: center;
+}
+
+.sl-uptime-cell__value {
+  font-family: var(--font-mono);
+  font-size: 21px;
+  font-weight: 500;
+}
+
+.sl-uptime-cell__label {
+  font-size: 10.5px;
+  color: var(--ink-faint);
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  margin-top: 3px;
+}
+
+.sl-section-label {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--ink-faint);
+  margin: 26px 0 10px;
+}
+
+.sl-incident-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 10px 0;
+  border-bottom: 1px solid var(--panel-border);
+  font-size: 13px;
+  gap: 12px;
+}
+
+.sl-incident-row:last-child {
+  border-bottom: none;
+}
+
+/* This is the actual flex child of .sl-incident-row (the date line and
+   the error line stack inside it) - min-width: 0 has to live here, not
+   just on .sl-incident-row__error below. A grandchild's min-width: 0
+   can't undo the flex item's own default min-width: auto, so without
+   this wrapper the long error text still forced the row - and the
+   whole page - into horizontal scroll. Same root cause as the detail
+   header fix above, one level deeper. */
+.sl-incident-row__main {
+  min-width: 0;
+  flex: 1 1 auto;
+}
+
+.sl-incident-row__error {
+  color: var(--ink-dim);
+  font-size: 12px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.sl-incident-row__duration {
+  font-family: var(--font-mono);
+  font-size: 12px;
+  color: var(--ink-dim);
+  flex-shrink: 0;
+}
+
+/* Security findings need their own row style rather than reusing
+   .sl-incident-row: incident error text is a short single line meant to
+   truncate, but a finding's detail is a full sentence of advice that has
+   to be readable in full, so it wraps instead of getting cut off. */
+.sl-finding-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  gap: 12px;
+  padding: 10px 0;
+  border-bottom: 1px solid var(--panel-border);
+  font-size: 13px;
+}
+
+.sl-finding-row:last-child {
+  border-bottom: none;
+}
+
+.sl-finding-row__text {
+  min-width: 0;
+}
+
+.sl-finding-row__detail {
+  color: var(--ink-dim);
+  font-size: 12px;
+  white-space: normal;
+  overflow-wrap: break-word;
+}
+
+.sl-finding-row__result {
+  font-size: 12px;
+  font-weight: 600;
+  flex-shrink: 0;
+}
+
+.sl-expiry-row {
+  display: flex;
+  justify-content: space-between;
+  padding: 8px 0;
+  font-size: 13px;
+}
+
+.sl-expiry-row__label {
+  color: var(--ink-dim);
+}
+
+.sl-heatmap {
+  display: grid;
+  grid-auto-flow: column;
+  grid-template-rows: repeat(7, 11px);
+  grid-auto-columns: 11px;
+  gap: 3px;
+  overflow-x: auto;
+  padding: 4px 2px;
+}
+
+.sl-heatmap__cell {
+  border-radius: 2px;
+}
+
+/* ---------- Toast ---------- */
+
+.sl-toast-stack {
+  position: fixed;
+  bottom: 20px;
+  left: 50%;
+  transform: translateX(-50%);
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  z-index: 60;
+}
+
+.sl-toast {
+  background: var(--bg-alt);
+  border: 1px solid var(--panel-border);
+  border-radius: 10px;
+  padding: 10px 16px;
+  font-size: 13px;
+  box-shadow: 0 10px 30px -10px rgba(0, 0, 0, 0.6);
+  /* Same motion language as the modal overlay/page transitions - see
+     App.css's .sl-overlay comment. Toasts get a shorter travel distance
+     (they're small and already near the bottom edge) but the same
+     curve, so nothing in the app moves with a different "personality." */
+  animation: sl-toast-in 0.22s cubic-bezier(0.22, 0.8, 0.28, 1) both;
+}
+
+.sl-toast--leaving {
+  animation: sl-toast-out 0.2s cubic-bezier(0.22, 0.8, 0.28, 1) both;
+}
+
+@keyframes sl-toast-in {
+  from {
+    opacity: 0;
+    transform: translateY(10px);
+  }
+}
+
+@keyframes sl-toast-out {
+  to {
+    opacity: 0;
+    transform: translateY(6px) scale(0.97);
+  }
+}
+
+.sl-toast--error {
+  border-color: rgba(255, 93, 93, 0.4);
+  color: var(--alert);
+}
+
+/* ---------- Settings ---------- */
+
+.sl-settings-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 16px;
+  padding: 14px 0;
+  border-bottom: 1px solid var(--panel-border);
+}
+
+.sl-settings-row:last-child {
+  border-bottom: none;
+}
+
+.sl-settings-row__title {
+  font-size: 14px;
+  font-weight: 500;
+}
+
+.sl-settings-row__desc {
+  font-size: 12px;
+  color: var(--ink-dim);
+  margin-top: 2px;
+}
+
+.sl-toggle {
+  position: relative;
+  width: 40px;
+  height: 22px;
+  border-radius: 20px;
+  background: var(--panel-border);
+  border: none;
+  cursor: pointer;
+  flex-shrink: 0;
+  transition: background 0.15s ease;
+}
+
+.sl-toggle.on {
+  background: var(--signal);
+}
+
+.sl-toggle:disabled {
+  cursor: wait;
+}
+
+.sl-toggle__knob {
+  position: absolute;
+  top: 2px;
+  left: 2px;
+  width: 18px;
+  height: 18px;
+  border-radius: 50%;
+  background: #fff;
+  transition: transform 0.15s ease;
+}
+
+.sl-toggle.on .sl-toggle__knob {
+  transform: translateX(18px);
+}
+
+/* Mid-flight state: subscribing/unsubscribing push, or saving the
+   digest toggle, both involve a round trip (and for push, a browser
+   permission prompt) that can take a couple of seconds - long enough
+   that a toggle which just sits there disabled reads as broken. Turn
+   the knob into a spinner instead of leaving it static, and keep it
+   spinning at whichever side it started from (.on may or may not be
+   set yet depending on which direction it's moving) rather than
+   letting the spin animation's own transform silently cancel the
+   translateX that positions it. */
+.sl-toggle.busy .sl-toggle__knob {
+  background: transparent;
+  border: 2px solid rgba(255, 255, 255, 0.35);
+  border-top-color: #fff;
+  animation: sl-toggle-spin-off 0.6s linear infinite;
+}
+
+.sl-toggle.on.busy .sl-toggle__knob {
+  animation: sl-toggle-spin-on 0.6s linear infinite;
+}
+
+@keyframes sl-toggle-spin-off {
+  from {
+    transform: translateX(0) rotate(0deg);
+  }
+  to {
+    transform: translateX(0) rotate(360deg);
+  }
+}
+
+@keyframes sl-toggle-spin-on {
+  from {
+    transform: translateX(18px) rotate(0deg);
+  }
+  to {
+    transform: translateX(18px) rotate(360deg);
+  }
+}
+
+@media (max-width: 560px) {
+  .sl-shell {
+    padding: 20px 14px 60px;
+  }
+  /* This media query is exactly where the tab bar appears, and a
+     shorthand `padding` here was overwriting the extra bottom
+     clearance set on .sl-shell--with-tabbar above, no matter how that
+     rule was written - shorthand always wins over a single side. Redo
+     the bottom padding specifically for the tabbar case, after the
+     shorthand, so it isn't silently cancelled out again. */
+  .sl-shell--with-tabbar {
+    padding-bottom: calc(112px + env(safe-area-inset-bottom));
+  }
+  .sl-detail-title {
+    font-size: 19px;
+  }
+  .sl-uptime-cell {
+    padding: 10px 6px;
+  }
+  .sl-uptime-cell__value {
+    font-size: 17px;
+  }
+  .sl-field-row {
+    grid-template-columns: 1fr;
+  }
+  .sl-uptime-grid {
+    grid-template-columns: repeat(3, 1fr);
+    gap: 6px;
+  }
+  .sl-monitor-card__stats {
+    gap: 10px;
+  }
+  .sl-status-page-row__stats {
+    gap: 10px;
+  }
+  .sl-dashboard-toolbar {
+    flex-direction: column;
+    align-items: stretch;
+  }
+  .sl-dashboard-stats {
+    justify-content: space-between;
+    gap: 10px;
+  }
+  .sl-dashboard-actions {
+    width: 100%;
+  }
+  .sl-dashboard-actions .sl-btn {
+    flex: 1;
+    white-space: nowrap;
+  }
+  .sl-nav {
+    gap: 2px;
+  }
+  .sl-nav button {
+    font-size: 12px;
+    padding: 8px 8px;
+    white-space: nowrap;
+  }
+  .sl-finding-row {
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 4px;
+  }
+}
+
+/* Below the same breakpoint used everywhere else for "mobile," the
+   header's inline nav hands off to the fixed bottom tab bar instead -
+   having both would be redundant and the header nav cramps badly at
+   this width anyway. */
+@media (max-width: 560px) {
+  .sl-header .sl-nav {
+    display: none;
+  }
+}
+
+/* Logout transition overlay (LogoutTransition.jsx). Same positioning/
+   background as index.html's #sl-splash - deliberately kept as a
+   class here rather than trying to share that ID, since #sl-splash is
+   tied to one specific static element that main.jsx removes from the
+   DOM entirely after first load. The inner glow/icon/path classes are
+   NOT redefined here - they're reused directly from index.html's
+   inline <style>, which is global and already loaded by the time this
+   could ever render (deep in the authenticated app, logging out). */
+.sl-logout-transition {
+  position: fixed;
+  inset: 0;
+  z-index: 9999;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  overflow: hidden;
+  background: radial-gradient(ellipse at center, #10201a 0%, #0a0f0d 65%);
+  transition: opacity 0.4s ease;
+}
+.sl-logout-transition--hidden {
+  opacity: 0;
+  pointer-events: none;
+}
+
+/* ===================================================================
+   Starlink Monitor additions
+   Everything above this line is Pulse's design system, carried over
+   unchanged apart from the class prefix. What follows is only what
+   this app needs that a single-status uptime monitor didn't: the
+   three-axis card, the map, and the longer forms that come with
+   tracking money and places rather than URLs.
+   =================================================================== */
+
+:root {
+  /* Grace gets its own colour rather than sharing amber with "expiring
+     soon". They're adjacent states and the entire point of separating
+     them is that one is a heads-up and the other is money already late -
+     rendering both amber would throw that distinction away at exactly
+     the glance it matters for. */
+  --orange: #ff8c42;
+  --orange-dim: rgba(255, 140, 66, 0.15);
+}
+
+/* ---------- Kit cards ---------- */
+
+.sl-kit-grid {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.sl-kit-card {
+  cursor: pointer;
+  transition: border-color 0.15s ease, transform 0.15s ease;
+}
+
+.sl-kit-card:active {
+  transform: scale(0.995);
+}
+
+.sl-kit-card__head {
+  margin-bottom: 14px;
+}
+
+.sl-kit-card__name {
+  font-family: var(--font-display);
+  font-weight: 600;
+  font-size: 15px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+  /* min-width: 0 on a flex child that holds arbitrary-length text -
+     without it a long kit name refuses to shrink and pushes the card
+     into horizontal overflow, which is the exact failure the global
+     overflow-x: hidden further up exists to contain. Fixing it here
+     means the name wraps instead of the layout being clipped. */
+  min-width: 0;
+}
+
+.sl-kit-card__client {
+  font-size: 12.5px;
+  color: var(--ink-dim);
+  margin-top: 3px;
+}
+
+/* Three equal columns so the axes line up down a list of cards and can
+   be read as columns rather than as three separate labels per card.
+   This is the whole reason the card looks like this: comparing the same
+   axis across kits is the common action, not reading one card in full. */
+.sl-axes {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 10px;
+}
+
+.sl-axis__label {
+  font-size: 10px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--ink-faint);
+}
+
+.sl-axis__value {
+  font-family: var(--font-display);
+  font-weight: 600;
+  font-size: 14px;
+  margin-top: 4px;
+  /* The three values are different lengths ("Active" vs "Expiring
+     soon"), and letting them wrap to two lines on one card and not
+     another would break the column alignment the grid exists for. */
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.sl-axis__sub {
+  font-size: 11px;
+  color: var(--ink-dim);
+  margin-top: 3px;
+}
+
+.sl-kit-card__foot {
+  display: flex;
+  justify-content: space-between;
+  gap: 10px;
+  margin-top: 14px;
+  padding-top: 10px;
+  border-top: 1px solid var(--panel-border);
+  font-size: 11.5px;
+  color: var(--ink-faint);
+}
+
+@media (max-width: 420px) {
+  /* Below this the three columns get too narrow for "Expiring soon" to
+     read at all. Two-up with usage wrapping underneath keeps every
+     value legible; the column-comparison benefit is mostly lost on a
+     screen this size anyway, since only one card is really in view. */
+  .sl-axes {
+    grid-template-columns: repeat(2, 1fr);
+  }
+}
+
+/* ---------- Filters and view toggle ---------- */
+
+.sl-filters {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  flex-wrap: wrap;
+  margin-bottom: 18px;
+}
+
+.sl-filters__selects {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+  flex: 1 1 260px;
+  min-width: 0;
+}
+
+.sl-filters__selects .sl-dropdown {
+  width: auto;
+  min-width: 140px;
+  flex: 1 1 140px;
+}
+
+.sl-toggle-group {
+  display: inline-flex;
+  border: 1px solid var(--panel-border);
+  border-radius: 10px;
+  overflow: hidden;
+}
+
+.sl-toggle-group button {
+  background: transparent;
+  border: 0;
+  padding: 7px 14px;
+  font-size: 12.5px;
+  color: var(--ink-dim);
+  cursor: pointer;
+}
+
+.sl-toggle-group button.active {
+  background: var(--signal-dim);
+  color: var(--signal);
+}
+
+/* ---------- Map ---------- */
+
+.sl-map {
+  width: 100%;
+  border-radius: var(--radius);
+  overflow: hidden;
+  /* OSM tiles are light and this app is dark. Rather than a CSS filter
+     inversion (which turns roads grey-on-grey and makes labels hard to
+     read), the tiles keep their own colours and are dimmed slightly so
+     the coloured status pins stay the brightest thing on the map -
+     which is what anyone is actually looking at. */
+  filter: saturate(0.8) brightness(0.88);
+  background: var(--bg-alt);
+}
+
+.sl-map__note {
+  margin-top: 8px;
+  font-size: 11.5px;
+  color: var(--ink-faint);
+}
+
+/* Leaflet's own popup chrome is white with a light border; restyled
+   rather than left alone, since one light rectangle on a dark map is
+   more jarring than the tiles are. */
+.leaflet-popup-content-wrapper,
+.leaflet-popup-tip {
+  background: #10201a;
+  color: var(--ink);
+  border: 1px solid var(--panel-border);
+  box-shadow: 0 8px 28px rgba(0, 0, 0, 0.5);
+}
+
+.leaflet-popup-content {
+  margin: 12px 14px;
+}
+
+.leaflet-container a.leaflet-popup-close-button {
+  color: var(--ink-dim);
+}
+
+.leaflet-control-attribution {
+  background: rgba(10, 15, 13, 0.7) !important;
+  color: var(--ink-faint) !important;
+}
+
+.leaflet-control-attribution a {
+  color: var(--ink-dim) !important;
+}
+
+.sl-map-popup__name {
+  font-family: var(--font-display);
+  font-weight: 600;
+  font-size: 14px;
+}
+
+.sl-map-popup__client {
+  font-size: 12px;
+  color: var(--ink-dim);
+  margin-bottom: 6px;
+}
+
+.sl-map-popup__row {
+  font-size: 12px;
+  color: var(--ink-dim);
+}
+
+.sl-map-popup__btn {
+  margin-top: 10px;
+  background: var(--signal-dim);
+  color: var(--signal);
+  border: 0;
+  border-radius: 8px;
+  padding: 6px 12px;
+  font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+/* ---------- Forms ---------- */
+
+.sl-form-row {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 12px;
+}
+
+@media (max-width: 560px) {
+  .sl-form-row {
+    grid-template-columns: 1fr;
+  }
+}
+
+.sl-field__label {
+  font-size: 12px;
+  color: var(--ink-dim);
+}
+
+.sl-hint {
+  font-size: 11.5px;
+  color: var(--ink-faint);
+  line-height: 1.45;
+}
+
+.sl-linkbtn {
+  background: none;
+  border: 0;
+  padding: 0;
+  color: var(--signal);
+  font-size: 12px;
+  cursor: pointer;
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+
+.sl-advanced-toggle {
+  display: block;
+  margin: 4px 0 14px;
+}
+
+.sl-advanced {
+  border: 1px solid var(--panel-border);
+  border-radius: var(--radius);
+  padding: 14px;
+  margin-bottom: 14px;
+}
+
+.sl-modal--wide {
+  max-width: 560px;
+}
+
+.sl-geocode {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+  margin-bottom: 12px;
+}
+
+.sl-geocode .sl-hint {
+  flex: 1 1 220px;
+  min-width: 0;
+}
+
+.sl-candidates {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin-bottom: 12px;
+}
+
+.sl-candidate {
+  text-align: left;
+  background: var(--panel);
+  border: 1px solid var(--panel-border);
+  border-radius: 10px;
+  padding: 9px 12px;
+  cursor: pointer;
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+
+.sl-candidate__label {
+  font-size: 12.5px;
+  color: var(--ink);
+  /* Nominatim display_name values are long and comma-heavy; clamped
+     rather than wrapped so a list of five candidates stays scannable. */
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.sl-candidate__coords {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  color: var(--ink-faint);
+}
+
+/* ---------- Detail view ---------- */
+
+.sl-detail-head__actions {
+  display: flex;
+  gap: 8px;
+}
+
+.sl-detail-sub {
+  font-size: 13.5px;
+  color: var(--ink-dim);
+  margin-top: 2px;
+}
+
+.sl-detail-meta {
+  font-size: 12px;
+  color: var(--ink-faint);
+  margin-top: 8px;
+}
+
+.sl-notice {
+  margin-top: 12px;
+  padding: 10px 12px;
+  border-radius: 10px;
+  background: var(--amber-dim);
+  color: var(--amber);
+  font-size: 12.5px;
+  line-height: 1.45;
+}
+
+.sl-axis-head {
+  margin-bottom: 12px;
+}
+
+.sl-axis-head__value {
+  font-family: var(--font-display);
+  font-weight: 600;
+  font-size: 20px;
+}
+
+.sl-axis-head__sub {
+  font-size: 12.5px;
+  color: var(--ink-dim);
+  margin-top: 4px;
+  line-height: 1.45;
+}
+
+.sl-kv {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  gap: 6px 16px;
+  margin: 0 0 12px;
+  font-size: 12.5px;
+}
+
+.sl-kv dt {
+  color: var(--ink-faint);
+}
+
+.sl-kv dd {
+  margin: 0;
+  color: var(--ink);
+  text-align: right;
+}
+
+.sl-actions {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.sl-snooze-panel {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+
+.sl-list {
+  display: flex;
+  flex-direction: column;
+}
+
+.sl-list-row {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 10px 0;
+  border-bottom: 1px solid var(--panel-border);
+}
+
+.sl-list-row:last-child {
+  border-bottom: 0;
+  padding-bottom: 0;
+}
+
+.sl-list-row:first-child {
+  padding-top: 0;
+}
+
+.sl-list-row > div:first-child {
+  /* Same min-width: 0 reasoning as .sl-kit-card__name - long notes and
+     display names otherwise refuse to shrink and force the row wide. */
+  min-width: 0;
+}
+
+.sl-list-row__title {
+  font-size: 13px;
+  font-weight: 500;
+}
+
+.sl-list-row__sub {
+  font-size: 11.5px;
+  color: var(--ink-faint);
+  margin-top: 2px;
+  line-height: 1.5;
+}
+
+.sl-token {
+  display: block;
+  margin-top: 10px;
+  padding: 10px 12px;
+  border-radius: 10px;
+  background: var(--bg-alt);
+  border: 1px solid var(--panel-border);
+  font-family: var(--font-mono);
+  font-size: 12px;
+  color: var(--signal);
+  /* A token is the one thing in this app that genuinely has to be
+     copyable and can be long enough to overflow, so it wraps rather
+     than being clipped - a half-visible credential is useless. */
+  word-break: break-all;
+}
+
+.sl-auth__mark {
+  width: 24px;
+  height: 24px;
+}

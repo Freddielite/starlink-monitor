@@ -1,0 +1,194 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta
+      name="viewport"
+      content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover"
+    />
+    <meta name="theme-color" content="#0a0f0d" />
+    <meta name="apple-mobile-web-app-capable" content="yes" />
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+    <title>Starlink Monitor</title>
+    <link rel="manifest" href="/manifest.webmanifest" />
+    <link rel="icon" href="/icon.svg" type="image/svg+xml" />
+    <link rel="apple-touch-icon" href="/apple-touch-icon.png" />
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@500;600;700&family=Inter:wght@400;500;600&family=IBM+Plex+Mono:wght@400;500&display=swap"
+      rel="stylesheet"
+    />
+    <style>
+      /* Splash screen: shown instantly on load (no JS/React needed yet),
+         removed once main.jsx signals the app has mounted and the
+         sequence below has had time to play.
+
+         The icon is inlined as SVG rather than an <img> so the signal
+         arcs can be animated with stroke-dashoffset: the dish settles
+         in, then three arcs trace outward in sequence, like acquisition.
+         The motion is tied to what the app is about rather than being a
+         generic logo bounce - same idea as Pulse's tracing heartbeat
+         line, different subject. */
+      #sl-splash {
+        position: fixed;
+        inset: 0;
+        z-index: 9999;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        overflow: hidden;
+        background: radial-gradient(ellipse at center, #10201a 0%, #0a0f0d 65%);
+        transition: opacity 0.4s ease;
+      }
+      #sl-splash.sl-splash-hidden {
+        opacity: 0;
+        pointer-events: none;
+      }
+
+      .sl-splash-glow {
+        position: absolute;
+        width: 240px;
+        height: 240px;
+        border-radius: 50%;
+        background: radial-gradient(circle, rgba(61, 220, 132, 0.36), transparent 70%);
+        filter: blur(2px);
+        opacity: 0;
+        animation: sl-glow-bloom 1.7s cubic-bezier(0.2, 0.7, 0.3, 1) forwards;
+      }
+
+      .sl-splash-icon {
+        position: relative;
+        width: 96px;
+        height: 96px;
+        opacity: 0;
+        transform: scale(0.86);
+        animation: sl-icon-in 1.7s cubic-bezier(0.16, 0.85, 0.24, 1) forwards;
+      }
+
+      .sl-splash-dish {
+        fill: none;
+        stroke: #e7f2ec;
+        stroke-width: 6;
+        stroke-linecap: round;
+        stroke-linejoin: round;
+        opacity: 0.9;
+      }
+
+      /* One dasharray value comfortably longer than any of the three
+         arc paths, so each is fully hidden before its own trace begins.
+         Sized once here rather than measured per-path - a slightly
+         oversized dasharray just means the trace starts a hair sooner,
+         which is invisible, whereas an undersized one leaves a visible
+         stub of the arc drawn before the animation starts. */
+      .sl-splash-arc {
+        fill: none;
+        stroke: #3ddc84;
+        stroke-width: 6;
+        stroke-linecap: round;
+        stroke-dasharray: 60;
+        stroke-dashoffset: 60;
+        animation: sl-draw 0.55s cubic-bezier(0.65, 0, 0.35, 1) forwards,
+          sl-arc-glow 1.8s ease-in-out infinite;
+      }
+      /* Staggered so the arcs read as travelling outward rather than
+         appearing together. The glow delay on each matches its own
+         trace finishing, so nothing pulses before it's fully drawn. */
+      .sl-splash-arc--1 {
+        animation-delay: 0.2s, 0.75s;
+      }
+      .sl-splash-arc--2 {
+        animation-delay: 0.42s, 0.97s;
+      }
+      .sl-splash-arc--3 {
+        animation-delay: 0.64s, 1.19s;
+      }
+
+      @keyframes sl-draw {
+        to {
+          stroke-dashoffset: 0;
+        }
+      }
+      @keyframes sl-arc-glow {
+        0%,
+        100% {
+          filter: drop-shadow(0 0 3px rgba(61, 220, 132, 0.5));
+        }
+        50% {
+          filter: drop-shadow(0 0 12px rgba(61, 220, 132, 0.95));
+        }
+      }
+      @keyframes sl-glow-bloom {
+        0% {
+          opacity: 0;
+          transform: scale(0.5);
+        }
+        45% {
+          opacity: 1;
+          transform: scale(1.15);
+        }
+        100% {
+          opacity: 0.55;
+          transform: scale(1);
+        }
+      }
+      @keyframes sl-icon-in {
+        0% {
+          opacity: 0;
+          transform: scale(0.86);
+        }
+        25% {
+          opacity: 1;
+        }
+        60% {
+          transform: scale(1.05);
+        }
+        80% {
+          transform: scale(0.98);
+        }
+        100% {
+          opacity: 1;
+          transform: scale(1);
+        }
+      }
+
+      /* Respect reduced-motion: keep the reveal, drop everything that
+         moves. */
+      @media (prefers-reduced-motion: reduce) {
+        .sl-splash-glow,
+        .sl-splash-icon {
+          animation: none !important;
+          opacity: 1;
+          transform: scale(1);
+        }
+        .sl-splash-arc {
+          stroke-dashoffset: 0;
+          animation: none !important;
+          filter: drop-shadow(0 0 5px rgba(61, 220, 132, 0.7));
+        }
+      }
+    </style>
+  </head>
+  <body>
+    <div id="root"></div>
+    <div id="sl-splash">
+      <div class="sl-splash-glow"></div>
+      <svg class="sl-splash-icon" viewBox="0 0 100 100" xmlns="http://www.w3.org/2000/svg">
+        <path class="sl-splash-dish" d="M22 70 Q34 46 54 54" />
+        <path class="sl-splash-dish" d="M35 60 L38 80" />
+        <path class="sl-splash-dish" d="M29 82 H47" />
+        <path class="sl-splash-arc sl-splash-arc--1" d="M58 57 Q56 44 45 42" />
+        <path class="sl-splash-arc sl-splash-arc--2" d="M68 55 Q64 38 48 33" />
+        <path class="sl-splash-arc sl-splash-arc--3" d="M78 53 Q72 31 50 24" />
+      </svg>
+    </div>
+    <script>
+      // Timestamped inline, right as the splash markup lands - the most
+      // accurate "the splash became visible" mark available, used by
+      // main.jsx to guarantee the sequence gets its full runtime
+      // regardless of how fast the module script loads.
+      window.__slSplashStart = performance.now();
+    </script>
+    <script type="module" src="/src/main.jsx"></script>
+  </body>
+</html>

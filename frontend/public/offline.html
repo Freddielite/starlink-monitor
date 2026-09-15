@@ -1,0 +1,111 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no" />
+    <meta name="theme-color" content="#0a0f0d" />
+    <title>Starlink Monitor - Offline</title>
+    <style>
+      * {
+        box-sizing: border-box;
+      }
+      html,
+      body {
+        height: 100%;
+        margin: 0;
+      }
+      body {
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        background: radial-gradient(ellipse at top, #0e1512, #0a0f0d 60%);
+        color: #e7f2ec;
+        font-family:
+          -apple-system, BlinkMacSystemFont, "Inter", "Segoe UI", Roboto, sans-serif;
+        -webkit-font-smoothing: antialiased;
+        padding: 24px;
+      }
+      .wrap {
+        max-width: 340px;
+        text-align: center;
+      }
+      .icon {
+        width: 64px;
+        height: 64px;
+        margin: 0 auto 28px;
+      }
+      .icon path {
+        fill: none;
+        stroke: #3ddc84;
+        stroke-width: 7;
+        stroke-linecap: round;
+        stroke-linejoin: round;
+      }
+      h1 {
+        font-family: "Space Grotesk", -apple-system, sans-serif;
+        font-size: 22px;
+        font-weight: 700;
+        margin: 0 0 12px;
+      }
+      p {
+        font-size: 14px;
+        line-height: 1.55;
+        color: #7d938c;
+        margin: 0 0 26px;
+      }
+      button {
+        appearance: none;
+        border: none;
+        background: #3ddc84;
+        color: #0a0f0d;
+        font-family: inherit;
+        font-size: 15px;
+        font-weight: 700;
+        padding: 13px 34px;
+        border-radius: 999px;
+        cursor: pointer;
+      }
+      button:active {
+        background: #34c775;
+      }
+      .status {
+        margin-top: 16px;
+        font-size: 12px;
+        color: #4d5f59;
+        font-family: "IBM Plex Mono", monospace;
+      }
+    </style>
+  </head>
+  <body>
+    <div class="wrap">
+      <svg class="icon" viewBox="0 0 100 100" xmlns="http://www.w3.org/2000/svg">
+        <path d="M8 50 H32 L40 28 L54 72 L64 50 H92" />
+      </svg>
+      <h1>You're offline</h1>
+      <p>Starlink Monitor can't reach the network right now. Check your connection and try again.</p>
+      <button id="retry">Retry</button>
+      <div class="status" id="status"></div>
+    </div>
+    <script>
+      // Auto-retry the moment the browser reports connectivity back,
+      // in addition to the manual button, so most people never have to
+      // do anything at all.
+      var statusEl = document.getElementById("status");
+
+      function reload() {
+        window.location.reload();
+      }
+
+      document.getElementById("retry").addEventListener("click", reload);
+
+      window.addEventListener("online", reload);
+
+      if (navigator.onLine) {
+        // We ended up here even though the browser thinks it's online -
+        // likely a real server-side/network failure rather than
+        // "device has no signal", so don't just spin forever on retry.
+        statusEl.textContent = "Connection detected - tap Try again";
+      }
+    </script>
+  </body>
+</html>
