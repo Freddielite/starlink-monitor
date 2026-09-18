@@ -6,7 +6,7 @@
       name="viewport"
       content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover"
     />
-    <meta name="theme-color" content="#0a0f0d" />
+    <meta name="theme-color" content="#0a0e14" />
     <meta name="apple-mobile-web-app-capable" content="yes" />
     <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
     <title>Starlink Monitor</title>
@@ -38,7 +38,7 @@
         align-items: center;
         justify-content: center;
         overflow: hidden;
-        background: radial-gradient(ellipse at center, #10201a 0%, #0a0f0d 65%);
+        background: radial-gradient(ellipse at center, #0f1a2b 0%, #0a0e14 65%);
         transition: opacity 0.4s ease;
       }
       #sl-splash.sl-splash-hidden {
@@ -51,7 +51,7 @@
         width: 240px;
         height: 240px;
         border-radius: 50%;
-        background: radial-gradient(circle, rgba(61, 220, 132, 0.36), transparent 70%);
+        background: radial-gradient(circle, rgba(77, 181, 255, 0.36), transparent 70%);
         filter: blur(2px);
         opacity: 0;
         animation: sl-glow-bloom 1.7s cubic-bezier(0.2, 0.7, 0.3, 1) forwards;
@@ -68,7 +68,7 @@
 
       .sl-splash-dish {
         fill: none;
-        stroke: #e7f2ec;
+        stroke: #e7eef7;
         stroke-width: 6;
         stroke-linecap: round;
         stroke-linejoin: round;
@@ -83,7 +83,7 @@
          stub of the arc drawn before the animation starts. */
       .sl-splash-arc {
         fill: none;
-        stroke: #3ddc84;
+        stroke: #4db5ff;
         stroke-width: 6;
         stroke-linecap: round;
         stroke-dasharray: 60;
@@ -112,10 +112,10 @@
       @keyframes sl-arc-glow {
         0%,
         100% {
-          filter: drop-shadow(0 0 3px rgba(61, 220, 132, 0.5));
+          filter: drop-shadow(0 0 3px rgba(77, 181, 255, 0.5));
         }
         50% {
-          filter: drop-shadow(0 0 12px rgba(61, 220, 132, 0.95));
+          filter: drop-shadow(0 0 12px rgba(77, 181, 255, 0.95));
         }
       }
       @keyframes sl-glow-bloom {
@@ -164,7 +164,7 @@
         .sl-splash-arc {
           stroke-dashoffset: 0;
           animation: none !important;
-          filter: drop-shadow(0 0 5px rgba(61, 220, 132, 0.7));
+          filter: drop-shadow(0 0 5px rgba(77, 181, 255, 0.7));
         }
       }
     </style>

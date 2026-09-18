@@ -57,8 +57,8 @@ export default function InstallPrompt() {
   return (
     <div className="sl-install-banner sl-panel">
       <svg className="sl-install-banner__icon" viewBox="0 0 100 100" xmlns="http://www.w3.org/2000/svg">
-        <rect width="100" height="100" rx="20" fill="#0a0f0d" />
-        <path d="M8 50 H32 L40 28 L54 72 L64 50 H92" fill="none" stroke="#3ddc84" strokeWidth="7" strokeLinecap="round" strokeLinejoin="round" />
+        <rect width="100" height="100" rx="20" fill="#0a0e14" />
+        <path d="M8 50 H32 L40 28 L54 72 L64 50 H92" fill="none" stroke="#4db5ff" strokeWidth="7" strokeLinecap="round" strokeLinejoin="round" />
       </svg>
       <div className="sl-install-banner__text">
         <div className="sl-install-banner__title">Install Starlink Monitor</div>

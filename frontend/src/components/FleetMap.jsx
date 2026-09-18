@@ -36,7 +36,7 @@ function pinColor(kit, colorBy) {
 function resolveColor(value) {
   const match = /^var\((--[\w-]+)\)$/.exec(value);
   if (!match) return value;
-  return getComputedStyle(document.documentElement).getPropertyValue(match[1]).trim() || "#7d938c";
+  return getComputedStyle(document.documentElement).getPropertyValue(match[1]).trim() || "#7d8a99";
 }
 
 export function FleetMap({ kits, colorBy = "billing", onSelect, height = 420 }) {

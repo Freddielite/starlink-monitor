@@ -333,7 +333,7 @@ function OrgDetail({ orgId, myRole, onChanged, toast }) {
             </div>
             <div className="sl-field" style={{ marginBottom: 0 }}>
               <label>Accent color</label>
-              <input value={brandAccentColor} onChange={(e) => setBrandAccentColor(e.target.value)} placeholder="#3ddc84" />
+              <input value={brandAccentColor} onChange={(e) => setBrandAccentColor(e.target.value)} placeholder="#4db5ff" />
             </div>
             <div className="sl-field" style={{ marginBottom: 0 }}>
               <label>Logo</label>

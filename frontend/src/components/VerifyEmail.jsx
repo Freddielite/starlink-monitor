@@ -46,8 +46,8 @@ export default function VerifyEmail({ token }) {
       <div className="sl-panel sl-auth__card">
         <div className="sl-auth__brand">
           <svg width="24" height="24" viewBox="0 0 100 100">
-            <rect width="100" height="100" rx="20" fill="#0a0f0d" />
-            <path d="M8 50 H32 L40 28 L54 72 L64 50 H92" fill="none" stroke="#3ddc84" strokeWidth="7" strokeLinecap="round" strokeLinejoin="round" />
+            <rect width="100" height="100" rx="20" fill="#0a0e14" />
+            <path d="M8 50 H32 L40 28 L54 72 L64 50 H92" fill="none" stroke="#4db5ff" strokeWidth="7" strokeLinecap="round" strokeLinejoin="round" />
           </svg>
           Starlink Monitor
         </div>

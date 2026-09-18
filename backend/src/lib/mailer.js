@@ -41,7 +41,7 @@ export async function sendAlertEmail({ to, subject, text, actionUrl, actionLabel
     payload.htmlContent = `<div style="font-family:Helvetica,Arial,sans-serif;font-size:15px;line-height:1.5;color:#1a1f1c;max-width:480px">
       <p>${escapeHtml(text)}</p>
       <p style="margin:24px 0;text-align:center">
-        <a href="${escapeHtml(actionUrl)}" style="display:inline-block;background:#3ddc84;color:#0a0f0d;font-weight:600;text-decoration:none;padding:10px 20px;border-radius:6px">${escapeHtml(actionLabel || "Open Starlink Monitor")}</a>
+        <a href="${escapeHtml(actionUrl)}" style="display:inline-block;background:#4db5ff;color:#0a0e14;font-weight:600;text-decoration:none;padding:10px 20px;border-radius:6px">${escapeHtml(actionLabel || "Open Starlink Monitor")}</a>
       </p>
       <p style="color:#8b96a3;font-size:12.5px">If the button doesn't work, copy this link: ${escapeHtml(actionUrl)}</p>
     </div>`;
