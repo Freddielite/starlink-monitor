@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import KitCard from "./KitCard.jsx";
 import KitCardSkeleton from "./KitCardSkeleton.jsx";
 import SwipeableRow from "./SwipeableRow.jsx";
@@ -20,6 +20,10 @@ export default function Dashboard({ kits, loading, onSelect, onAdd, onImport, on
   const [refreshing, setRefreshing] = useState(false);
   const [confirmingDeleteId, setConfirmingDeleteId] = useState(null);
   const [orgRoles, setOrgRoles] = useState({});
+  const [query, setQuery] = useState("");
+  const [page, setPage] = useState(1);
+  const [pageSize, setPageSize] = useState(25);
+  const searchRef = useRef(null);
 
   useEffect(() => {
     listOrganizations()
@@ -44,8 +48,33 @@ export default function Dashboard({ kits, loading, onSelect, onAdd, onImport, on
     [kits]
   );
 
+  // Searched across every field that identifies a kit, not just the
+  // name. Imported kits get their display name derived from an account
+  // email, so someone looking for a specific line will often type part
+  // of the address, or the client, or the town - and a search that only
+  // covered names would come back empty for all three.
+  const matchesQuery = useMemo(() => {
+    const terms = query.trim().toLowerCase().split(/\s+/).filter(Boolean);
+    if (terms.length === 0) return () => true;
+    return (kit) => {
+      const haystack = [
+        kit.name, kit.client_name, kit.account_email, kit.service_line,
+        kit.kit_serial, kit.city, kit.region, kit.country, kit.address,
+        kit.plan_name, kit.account_condition, kit.notes,
+      ]
+        .filter(Boolean)
+        .join(" ")
+        .toLowerCase();
+      // Every term has to appear somewhere, in any order - so "ajayi
+      // lekki" finds the kit whether the client or the town comes
+      // first in the record.
+      return terms.every((t) => haystack.includes(t));
+    };
+  }, [query]);
+
   const filtered = useMemo(() => {
     return kits
+      .filter(matchesQuery)
       .filter((k) => (client === ANY ? true : k.client_name === client))
       .filter((k) => (place === ANY ? true : k.city === place || k.region === place))
       .filter((k) => {
@@ -58,7 +87,35 @@ export default function Dashboard({ kits, loading, onSelect, onAdd, onImport, on
       })
       .slice()
       .sort((a, b) => urgencyRank(a) - urgencyRank(b) || a.name.localeCompare(b.name));
-  }, [kits, client, place, state]);
+  }, [kits, client, place, state, matchesQuery]);
+
+  // Any change to what's being filtered puts you back on page 1.
+  // Without this, narrowing a search while on page 4 leaves you staring
+  // at an empty list that looks like "no results" when there are
+  // plenty - just not that far down.
+  useEffect(() => {
+    setPage(1);
+  }, [query, client, place, state, pageSize]);
+
+  const totalPages = Math.max(1, Math.ceil(filtered.length / pageSize));
+  const currentPage = Math.min(page, totalPages);
+  const pageStart = (currentPage - 1) * pageSize;
+  const paged = filtered.slice(pageStart, pageStart + pageSize);
+
+  // "/" focuses the search, the way it does in most tools people already
+  // use. Ignored while typing in a field, so it doesn't hijack a slash
+  // in an address.
+  useEffect(() => {
+    const onKey = (e) => {
+      if (e.key !== "/" || e.metaKey || e.ctrlKey) return;
+      const tag = document.activeElement?.tagName;
+      if (tag === "INPUT" || tag === "TEXTAREA") return;
+      e.preventDefault();
+      searchRef.current?.focus();
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, []);
 
   // Counted across the whole fleet, not the filtered view: these are the
   // numbers someone opens the app to check, and having them silently
@@ -150,6 +207,28 @@ export default function Dashboard({ kits, loading, onSelect, onAdd, onImport, on
         </div>
 
         <div className="sl-panel sl-filters">
+          <div className="sl-search">
+            <svg className="sl-search__icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round">
+              <circle cx="11" cy="11" r="7" />
+              <path d="M20 20l-3.5-3.5" />
+            </svg>
+            <input
+              ref={searchRef}
+              className="sl-search__input"
+              type="search"
+              value={query}
+              onChange={(e) => setQuery(e.target.value)}
+              placeholder="Search kits, clients, accounts, places…"
+              aria-label="Search kits"
+            />
+            {query && (
+              <button className="sl-search__clear" onClick={() => setQuery("")} aria-label="Clear search">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round">
+                  <path d="M6 6l12 12M18 6L6 18" />
+                </svg>
+              </button>
+            )}
+          </div>
           <div className="sl-toggle-group">
             <button className={view === "list" ? "active" : ""} onClick={() => setView("list")}>
               List
@@ -224,11 +303,59 @@ export default function Dashboard({ kits, loading, onSelect, onAdd, onImport, on
           </div>
         ) : filtered.length === 0 ? (
           <div className="sl-panel sl-empty">
-            <div className="sl-empty__title">Nothing matches those filters</div>
-            <div>{kits.length} kits total - try widening the selection.</div>
+            <div className="sl-empty__title">
+              {query ? `Nothing matches "${query}"` : "Nothing matches those filters"}
+            </div>
+            <div>
+              {kits.length} kit{kits.length === 1 ? "" : "s"} total — try widening the selection.
+            </div>
+            {query && (
+              <div style={{ marginTop: 10 }}>
+                <button className="sl-linkbtn" onClick={() => setQuery("")}>
+                  Clear the search
+                </button>
+              </div>
+            )}
           </div>
         ) : (
-          <div className="sl-kit-grid">{filtered.map(renderCard)}</div>
+          <>
+            <div className="sl-kit-grid">{paged.map(renderCard)}</div>
+            {filtered.length > pageSize && (
+              <div className="sl-pager">
+                <span className="sl-pager__count">
+                  {pageStart + 1}–{Math.min(pageStart + pageSize, filtered.length)} of {filtered.length}
+                </span>
+                <div className="sl-pager__controls">
+                  <button
+                    className="sl-btn sl-btn--ghost sl-btn--sm"
+                    onClick={() => setPage((n) => Math.max(1, n - 1))}
+                    disabled={currentPage === 1}
+                  >
+                    Previous
+                  </button>
+                  <span className="sl-pager__page">
+                    Page {currentPage} of {totalPages}
+                  </span>
+                  <button
+                    className="sl-btn sl-btn--ghost sl-btn--sm"
+                    onClick={() => setPage((n) => Math.min(totalPages, n + 1))}
+                    disabled={currentPage === totalPages}
+                  >
+                    Next
+                  </button>
+                </div>
+                <Dropdown
+                  value={String(pageSize)}
+                  onChange={(v) => setPageSize(Number(v))}
+                  options={[
+                    { value: "25", label: "25 per page" },
+                    { value: "50", label: "50 per page" },
+                    { value: "100", label: "100 per page" },
+                  ]}
+                />
+              </div>
+            )}
+          </>
         )}
       </PullToRefresh>
 

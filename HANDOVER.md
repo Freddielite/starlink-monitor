@@ -197,6 +197,15 @@ have produced a map quietly full of city centroids.
 - **Rows with no account email are rejected**, not imported. They can't
   be identified or re-matched, so importing them would create fresh
   duplicates on every subsequent upload.
+- **Search and pagination are client-side, over the full kit list.**
+  `GET /api/kits` returns every kit the user can see and the dashboard
+  filters in the browser. That's deliberate rather than lazy: the fleet
+  counts along the top and the map both need the *whole* set to be
+  correct, so server-side paging would mean a separate count query plus
+  a map that only ever showed one page. It's comfortable into the low
+  thousands of kits. Past that, the right move is a server-side
+  `GET /kits?q=&page=` for the list with the counts and map points
+  served separately - not paging the existing endpoint.
 - **Org-level custom domain is a note to yourself, not a feature.**
   Carried over from Pulse: the field records what you'd need to set up
   (a CNAME plus host routing/TLS), it doesn't do any of it.
@@ -294,6 +303,16 @@ Against the real 153-row operator spreadsheet:
 - Simulated next-month sheet where one client paid and one unverifiable
   account resolved: balance cleared to empty, condition cleared, still
   141 kits.
+
+Search and pagination, against those same 141 imported kits:
+
+- Partial matches across derived names, account emails, conditions and
+  plans all returned sensible counts ("chief" 13, "roam" 49, "email not
+  found" 16, "kurutie" 4, a nonsense term 0).
+- Multi-term search is order-independent: "chief roam" and "roam chief"
+  both returned 6.
+- Page arithmetic at 25/50/100 per page covered all 141 rows with no
+  gaps and a correctly-sized final page in each case.
 
 Not verified here: live email/push/Telegram/webhook delivery (needs real
 credentials), a successful Nominatim lookup (the build sandbox blocks
