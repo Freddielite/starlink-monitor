@@ -63,6 +63,7 @@ export default function ImportKits({ onClose, onDone, toast }) {
   const [profile, setProfile] = useState("kits");
   const [busy, setBusy] = useState(false);
   const [geocoding, setGeocoding] = useState(null);
+  const [dragging, setDragging] = useState(false);
   const fileRef = useRef(null);
 
   // papaparse and SheetJS are loaded only when a file is actually
@@ -207,19 +208,48 @@ export default function ImportKits({ onClose, onDone, toast }) {
 
   return (
     <ModalOverlay open onCancel={busy ? undefined : onClose} closeOnBackdrop={false}>
-      <div className="sl-panel sl-modal sl-modal--wide" onClick={(e) => e.stopPropagation()}>
+      <div className={`sl-panel sl-modal${stage === "file" ? "" : " sl-modal--wide"}`} onClick={(e) => e.stopPropagation()}>
         <div className="sl-modal__title">Import kits from a spreadsheet</div>
 
         {stage === "file" && (
           <>
-            <div className="sl-hint" style={{ marginBottom: 14 }}>
-              A CSV or Excel file with one row per kit and a header row at the top. Column names don't have to match
-              anything - you'll map them on the next screen, and nothing is written until you've seen exactly what
-              will happen.
+            {/* A dropzone rather than a bare button: this is the one
+                screen with almost nothing on it, and a small button
+                floating in a large panel reads as unfinished. It also
+                makes the obvious gesture - dragging the file in - work,
+                which for a file someone just downloaded from their
+                sheet is faster than walking a file picker. */}
+            <div
+              className={`sl-dropzone${dragging ? " sl-dropzone--active" : ""}`}
+              role="button"
+              tabIndex={0}
+              onClick={() => fileRef.current?.click()}
+              onKeyDown={(e) => {
+                if (e.key === "Enter" || e.key === " ") {
+                  e.preventDefault();
+                  fileRef.current?.click();
+                }
+              }}
+              onDragOver={(e) => {
+                e.preventDefault();
+                setDragging(true);
+              }}
+              onDragLeave={() => setDragging(false)}
+              onDrop={(e) => {
+                e.preventDefault();
+                setDragging(false);
+                handleFile(e.dataTransfer.files?.[0]).catch((err) => toast(String(err.message), "error"));
+              }}
+            >
+              <svg className="sl-dropzone__icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
+                <path d="M14 3v5h5" />
+                <path d="M19 10v9a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h7z" />
+                <path d="M9 13h6M9 17h4" />
+              </svg>
+              <div className="sl-dropzone__title">Drop a spreadsheet here</div>
+              <div className="sl-dropzone__sub">or click to choose a file · CSV, XLSX or XLS</div>
             </div>
-            <button className="sl-btn" onClick={() => fileRef.current?.click()}>
-              Choose a file
-            </button>
+
             <input
               ref={fileRef}
               type="file"
@@ -227,9 +257,17 @@ export default function ImportKits({ onClose, onDone, toast }) {
               style={{ display: "none" }}
               onChange={(e) => handleFile(e.target.files?.[0]).catch((err) => toast(String(err.message), "error"))}
             />
-            <button className="sl-linkbtn" style={{ marginTop: 14 }} onClick={downloadTemplate}>
-              Download a template CSV
-            </button>
+
+            <div className="sl-dropzone__note">
+              One row per kit, with a header row at the top. Column names don't have to match anything — you'll map
+              them on the next screen, and nothing is saved until you've seen exactly what will happen.
+            </div>
+
+            <div className="sl-dropzone__foot">
+              <button className="sl-linkbtn" onClick={downloadTemplate}>
+                Download a template CSV
+              </button>
+            </div>
           </>
         )}
 

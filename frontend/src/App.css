@@ -2077,3 +2077,88 @@ a {
   background: var(--orange-dim);
   color: var(--orange);
 }
+
+/* ---------- Import dropzone ---------- */
+
+.sl-dropzone {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  text-align: center;
+  gap: 4px;
+  padding: 34px 20px;
+  border: 1px dashed var(--panel-border);
+  border-radius: 14px;
+  background: var(--panel);
+  cursor: pointer;
+  transition: border-color 0.15s ease, background 0.15s ease, transform 0.15s ease;
+}
+
+.sl-dropzone:hover,
+.sl-dropzone:focus-visible {
+  border-color: var(--signal);
+  background: var(--signal-dim);
+  outline: none;
+}
+
+/* Dragging state has to be clearly distinct from hover, not just a
+   slightly different shade: while a file is over the window the cursor
+   is carrying something and the user needs an unambiguous "yes, here"
+   rather than a subtle tint they have to squint at. */
+.sl-dropzone--active {
+  border-color: var(--signal);
+  border-style: solid;
+  background: var(--signal-dim);
+  transform: scale(1.01);
+}
+
+.sl-dropzone__icon {
+  width: 32px;
+  height: 32px;
+  color: var(--ink-faint);
+  margin-bottom: 8px;
+}
+
+.sl-dropzone:hover .sl-dropzone__icon,
+.sl-dropzone--active .sl-dropzone__icon {
+  color: var(--signal);
+}
+
+.sl-dropzone__title {
+  font-family: var(--font-display);
+  font-weight: 600;
+  font-size: 15px;
+}
+
+.sl-dropzone__sub {
+  font-size: 12px;
+  color: var(--ink-faint);
+}
+
+.sl-dropzone__note {
+  font-size: 12px;
+  color: var(--ink-faint);
+  line-height: 1.55;
+  margin-top: 14px;
+}
+
+/* Separated by a rule rather than just whitespace: the template link is
+   a secondary escape hatch, not a second step, and sitting it loose
+   under the paragraph made it read as part of the instructions. */
+.sl-dropzone__foot {
+  display: flex;
+  justify-content: center;
+  margin-top: 16px;
+  padding-top: 14px;
+  border-top: 1px solid var(--panel-border);
+}
+
+/* Dragging a file over the window makes the browser's own drop cursor
+   flicker across every child element underneath. Ignoring pointer
+   events on the dropzone's contents keeps dragleave from firing as the
+   pointer crosses the icon or the text, which otherwise makes the
+   active state strobe. */
+.sl-dropzone > * {
+  pointer-events: none;
+}
