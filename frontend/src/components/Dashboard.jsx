@@ -22,7 +22,7 @@ export default function Dashboard({ kits, loading, onSelect, onAdd, onImport, on
   const [orgRoles, setOrgRoles] = useState({});
   const [query, setQuery] = useState("");
   const [page, setPage] = useState(1);
-  const [pageSize, setPageSize] = useState(25);
+  const [pageSize, setPageSize] = useState(20);
   const searchRef = useRef(null);
 
   useEffect(() => {
@@ -207,28 +207,6 @@ export default function Dashboard({ kits, loading, onSelect, onAdd, onImport, on
         </div>
 
         <div className="sl-panel sl-filters">
-          <div className="sl-search">
-            <svg className="sl-search__icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round">
-              <circle cx="11" cy="11" r="7" />
-              <path d="M20 20l-3.5-3.5" />
-            </svg>
-            <input
-              ref={searchRef}
-              className="sl-search__input"
-              type="search"
-              value={query}
-              onChange={(e) => setQuery(e.target.value)}
-              placeholder="Search kits, clients, accounts, places…"
-              aria-label="Search kits"
-            />
-            {query && (
-              <button className="sl-search__clear" onClick={() => setQuery("")} aria-label="Clear search">
-                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round">
-                  <path d="M6 6l12 12M18 6L6 18" />
-                </svg>
-              </button>
-            )}
-          </div>
           <div className="sl-toggle-group">
             <button className={view === "list" ? "active" : ""} onClick={() => setView("list")}>
               List
@@ -275,6 +253,28 @@ export default function Dashboard({ kits, loading, onSelect, onAdd, onImport, on
                   { value: "hardware", label: "Colour by hardware" },
                 ]}
               />
+            )}
+          </div>
+          <div className="sl-search">
+            <svg className="sl-search__icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round">
+              <circle cx="11" cy="11" r="7" />
+              <path d="M20 20l-3.5-3.5" />
+            </svg>
+            <input
+              ref={searchRef}
+              className="sl-search__input"
+              type="search"
+              value={query}
+              onChange={(e) => setQuery(e.target.value)}
+              placeholder="Search kits, clients, accounts, places…"
+              aria-label="Search kits"
+            />
+            {query && (
+              <button className="sl-search__clear" onClick={() => setQuery("")} aria-label="Clear search">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round">
+                  <path d="M6 6l12 12M18 6L6 18" />
+                </svg>
+              </button>
             )}
           </div>
         </div>
@@ -348,7 +348,7 @@ export default function Dashboard({ kits, loading, onSelect, onAdd, onImport, on
                   value={String(pageSize)}
                   onChange={(v) => setPageSize(Number(v))}
                   options={[
-                    { value: "25", label: "25 per page" },
+                    { value: "20", label: "20 per page" },
                     { value: "50", label: "50 per page" },
                     { value: "100", label: "100 per page" },
                   ]}

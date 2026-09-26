@@ -2218,11 +2218,13 @@ a {
   position: relative;
   display: flex;
   align-items: center;
-  /* Takes the full row above the filter dropdowns rather than sitting
-     among them: search is the primary way through a few hundred kits,
-     and the dropdowns are refinements on top of it. */
+  /* Full width on its own row beneath the view toggle and the filter
+     dropdowns, rather than squeezed in among them. The dropdowns are a
+     fixed, known set of choices you scan; search is free text you type
+     into, and it needs the whole row to show what you've typed plus the
+     clear button. */
   flex: 1 0 100%;
-  margin-bottom: 4px;
+  margin-top: 4px;
 }
 
 .sl-search__icon {
