@@ -51,6 +51,10 @@ export const createKit = (payload) => apiFetch("/kits", { method: "POST", body: 
 export const updateKit = (id, payload) => apiFetch(`/kits/${id}`, { method: "PATCH", body: JSON.stringify(payload) });
 export const deleteKit = (id) => apiFetch(`/kits/${id}`, { method: "DELETE" });
 export const refreshKits = () => apiFetch("/kits/refresh", { method: "POST", timeoutMs: 40000 });
+// A few hundred rows plus a full per-row report back. Longer timeout than
+// a normal write because the commit path runs a billing resync per kit.
+export const importKits = (payload) => apiFetch("/kits/import", { method: "POST", body: JSON.stringify(payload), timeoutMs: 120000 });
+export const geocodeKit = (id) => apiFetch(`/kits/${id}/geocode`, { method: "POST", timeoutMs: 30000 });
 
 export const listPayments = (id) => apiFetch(`/kits/${id}/payments`);
 export const recordPayment = (id, payload) => apiFetch(`/kits/${id}/payments`, { method: "POST", body: JSON.stringify(payload) });

@@ -121,7 +121,9 @@ export default function KitDetail({ kit, currentUser, onBack, onChanged, toast }
       <div className="sl-panel">
         <div className="sl-detail-title">{kit.name}</div>
         {kit.client_name && <div className="sl-detail-sub">{kit.client_name}</div>}
+        {kit.account_condition && <div className="sl-notice sl-notice--warn">{kit.account_condition}</div>}
         <div className="sl-detail-meta">
+          {kit.account_email && <>{kit.account_email} · </>}
           {[kit.city, kit.region, kit.country].filter(Boolean).join(", ") || "No location set"}
           {kit.service_line && <> · {kit.service_line}</>}
           {kit.organization_name && <> · {kit.organization_name}</>}
@@ -150,6 +152,11 @@ export default function KitDetail({ kit, currentUser, onBack, onChanged, toast }
           <Row label="Next due" value={dateOnly(kit.next_due_at)} />
           <Row label="Last paid" value={kit.last_paid_at ? dateOnly(kit.last_paid_at) : "No payment recorded"} />
           <Row label="Amount" value={money(kit.plan_amount, kit.plan_currency) || "—"} />
+          {kit.outstanding_amount != null && (
+            <Row label="Outstanding" value={money(kit.outstanding_amount, kit.outstanding_currency)} />
+          )}
+          {kit.overdue_since && <Row label="Overdue since" value={dateOnly(kit.overdue_since)} />}
+          {kit.plan_name && <Row label="Plan" value={kit.plan_name} />}
           <Row
             label="Thresholds"
             value={`warns ${kit.thresholds?.expiring_soon_days}d before · ${kit.thresholds?.grace_days}d grace after`}

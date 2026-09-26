@@ -8,6 +8,7 @@ import SignalLine from "./components/SignalLine.jsx";
 import Dashboard from "./components/Dashboard.jsx";
 import KitDetail from "./components/KitDetail.jsx";
 import KitForm from "./components/KitForm.jsx";
+import ImportKits from "./components/ImportKits.jsx";
 import SettingsView from "./components/SettingsView.jsx";
 import InstallPrompt from "./components/InstallPrompt.jsx";
 import LogoutTransition from "./components/LogoutTransition.jsx";
@@ -44,6 +45,7 @@ export default function App() {
   const [selectedId, setSelectedId] = useState(null);
   const [tab, setTab] = useState("kits");
   const [adding, setAdding] = useState(false);
+  const [importing, setImporting] = useState(false);
   const [navAction, setNavAction] = useState("tab");
   const [logoutPhase, setLogoutPhase] = useState(null);
   const { toasts, push: toast } = useToast();
@@ -112,6 +114,7 @@ export default function App() {
       setTab("kits");
       setSelectedId(null);
       setAdding(false);
+      setImporting(false);
       // Cleared rather than left stale: the next login refetches
       // anyway, but not clearing would flash the previous account's
       // data on a shared device.
@@ -153,6 +156,7 @@ export default function App() {
               setSelectedId(k.id);
             }}
             onAdd={() => setAdding(true)}
+            onImport={() => setImporting(true)}
             onChanged={loadKits}
             currentUser={user}
             toast={toast}
@@ -174,6 +178,8 @@ export default function App() {
 
         {tab === "settings" && <SettingsView user={user} onUserUpdated={setUser} onLoggedOut={handleLoggedOut} toast={toast} />}
       </div>
+
+      {importing && <ImportKits onClose={() => setImporting(false)} onDone={loadKits} toast={toast} />}
 
       {adding && (
         <KitForm

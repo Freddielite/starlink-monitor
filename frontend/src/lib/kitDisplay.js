@@ -54,6 +54,14 @@ export function isIdle(kit) {
   return days !== null && days >= (kit.thresholds?.idle_alert_days ?? 30);
 }
 
+// A kit whose account couldn't be verified isn't healthy and isn't
+// unhealthy - it's unknown, and unknown records are the ones that
+// quietly rot. Given its own count on the dashboard so they can't hide
+// inside the Active total.
+export function needsChecking(kit) {
+  return !!kit.account_condition;
+}
+
 export function isSnoozed(kit) {
   return !!kit.snoozed_until && new Date(kit.snoozed_until).getTime() > Date.now();
 }
@@ -119,6 +127,9 @@ const BILLING_RANK = { suspended: 0, grace: 1, expiring_soon: 2, active: 4, canc
 
 export function urgencyRank(kit) {
   if (kit.hardware_state === "offline") return -1;
+  // Above healthy kits but below real money problems: worth getting to,
+  // not worth burying an overdue account under.
+  if (needsChecking(kit)) return 2.5;
   const base = BILLING_RANK[kit.billing_state] ?? 4;
   if (base >= 4 && isIdle(kit)) return 3;
   return base;

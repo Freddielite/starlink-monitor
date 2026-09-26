@@ -277,6 +277,41 @@ export async function migrate() {
       -- Same self-quieting shape as Pulse's content_hash.
       billing_alerted_state TEXT,
 
+      -- The Starlink account this kit is managed under. In practice
+      -- this is the real identity of a kit: an operator's records are
+      -- keyed on the login, not on a name someone invented, and it's
+      -- the only value stable enough to re-import a sheet against
+      -- without creating duplicates. Nullable because kits added by
+      -- hand may not have one.
+      --
+      -- NOTE: the account PASSWORD is deliberately absent, and must
+      -- stay absent. Operator spreadsheets routinely carry them, and
+      -- the importer drops that column on the floor rather than
+      -- storing it - see lib/importKits.js. A tracking tool has no use
+      -- for a credential that grants full control of the service, and
+      -- holding it turns a database leak into a fleet takeover.
+      account_email     TEXT,
+      -- Account-level conditions that are NOT billing states: the
+      -- account couldn't be found, has no subscription, has no device,
+      -- was transferred away, is geo-restricted. Kept separate from
+      -- billing_state on purpose - "Email Not Found" is a problem with
+      -- the record, not a statement about whether anyone has paid, and
+      -- collapsing the two would make a data-entry error look like a
+      -- healthy account.
+      account_condition TEXT,
+      -- What's currently owed, as distinct from plan_amount (the
+      -- recurring price). A fleet billed in three currencies is normal,
+      -- so the currency travels with the amount rather than being
+      -- assumed from the kit or the org.
+      outstanding_amount   NUMERIC(12,2),
+      outstanding_currency TEXT,
+      -- When the account went overdue or was suspended, as recorded
+      -- upstream. Distinct from billing_state_changed_at, which is when
+      -- THIS app noticed.
+      overdue_since     TIMESTAMPTZ,
+      last_payment_amount   NUMERIC(12,2),
+      last_payment_currency TEXT,
+
       -- ---------------- Axis 2: hardware ----------------
       -- online | offline | unknown. Defaults to unknown and STAYS
       -- unknown until something actually says otherwise, because
@@ -358,7 +393,17 @@ export async function migrate() {
       updated_at        TIMESTAMPTZ NOT NULL DEFAULT now()
     );
 
+    ALTER TABLE kits ADD COLUMN IF NOT EXISTS account_email TEXT;
+    ALTER TABLE kits ADD COLUMN IF NOT EXISTS account_condition TEXT;
+    ALTER TABLE kits ADD COLUMN IF NOT EXISTS outstanding_amount NUMERIC(12,2);
+    ALTER TABLE kits ADD COLUMN IF NOT EXISTS outstanding_currency TEXT;
+    ALTER TABLE kits ADD COLUMN IF NOT EXISTS overdue_since TIMESTAMPTZ;
+    ALTER TABLE kits ADD COLUMN IF NOT EXISTS last_payment_amount NUMERIC(12,2);
+    ALTER TABLE kits ADD COLUMN IF NOT EXISTS last_payment_currency TEXT;
+
     CREATE INDEX IF NOT EXISTS idx_kits_user_id ON kits(user_id);
+    -- The natural key for re-importing a sheet.
+    CREATE INDEX IF NOT EXISTS idx_kits_account_email ON kits(lower(account_email)) WHERE account_email IS NOT NULL;
     CREATE INDEX IF NOT EXISTS idx_kits_organization ON kits(organization_id);
     CREATE INDEX IF NOT EXISTS idx_kits_next_due ON kits(next_due_at) WHERE active = true;
     -- Partial index for the agent heartbeat lookup, which is by token

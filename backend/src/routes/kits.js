@@ -7,6 +7,7 @@ import { recordKitEvent } from "../lib/kitEvents.js";
 import { runBillingSweep } from "../lib/sweeps.js";
 import { geocodeAddress, validateCoords } from "../lib/geocode.js";
 import { hashToken } from "../lib/apiTokens.js";
+import { parseRow, parseAccountRow, findInternalDuplicates } from "../lib/importKits.js";
 import {
   resolveThresholds,
   deriveBillingState,
@@ -301,6 +302,7 @@ const PATCHABLE = [
   "plan_name", "plan_amount", "plan_currency", "billing_cycle", "billing_cycle_days", "next_due_at",
   "grace_days", "expiring_soon_days", "idle_alert_days", "offline_after_min", "alert_after_misses",
   "address", "city", "region", "country", "latitude", "longitude",
+  "account_email", "account_condition", "outstanding_amount", "outstanding_currency", "overdue_since",
 ];
 
 router.patch("/:id", async (req, res) => {
@@ -374,12 +376,12 @@ router.patch("/:id", async (req, res) => {
 });
 
 function normalizeField(field, value) {
-  if (["plan_amount", "latitude", "longitude", "grace_days", "expiring_soon_days", "idle_alert_days", "offline_after_min", "billing_cycle_days"].includes(field)) {
+  if (["plan_amount", "outstanding_amount", "latitude", "longitude", "grace_days", "expiring_soon_days", "idle_alert_days", "offline_after_min", "billing_cycle_days"].includes(field)) {
     return parseNumberOrNull(value);
   }
   if (field === "alert_after_misses") return Math.max(1, Number(value) || 2);
   if (field === "active") return !!value;
-  if (field === "next_due_at") return parseDate(value, field).value;
+  if (field === "next_due_at" || field === "overdue_since") return parseDate(value, field).value;
   if (field === "billing_cycle") return ["monthly", "30_day", "custom"].includes(value) ? value : "monthly";
   if (typeof value === "string") return value.trim() || null;
   return value;
@@ -670,6 +672,266 @@ router.post("/geocode", async (req, res) => {
   const { address, city, region, country } = req.body || {};
   const result = await geocodeAddress({ address, city, region, country });
   res.json(result);
+});
+
+// Geocode ONE existing kit from its stored address and save the best
+// match. Exists for backfilling after an import: bulk geocoding is
+// exactly what Nominatim's ~1 req/sec policy forbids, so rather than
+// looping server-side inside a single request (which would hold a
+// connection open for minutes and die on any timeout), the client walks
+// its unlocated kits one at a time and can stop, resume, or skip. The
+// throttle in lib/geocode.js still paces it regardless of how fast the
+// client asks.
+router.post("/:id/geocode", async (req, res) => {
+  const kit = await loadKitForMutation(req, res);
+  if (!kit) return;
+  if (kit.latitude !== null && kit.longitude !== null && !req.body?.overwrite) {
+    return res.json({ skipped: true, reason: "this kit already has coordinates" });
+  }
+
+  const { results, reason } = await geocodeAddress(kit);
+  if (results.length === 0) return res.json({ located: false, reason: reason || "no match for this address" });
+
+  const best = results[0];
+  const { rows } = await pool.query(
+    `UPDATE kits SET latitude = $1, longitude = $2, geocode_source = 'nominatim', updated_at = now()
+     WHERE id = $3 RETURNING *`,
+    [best.latitude, best.longitude, kit.id]
+  );
+  await recordKitEvent(kit.id, {
+    kind: "location_updated",
+    title: "Located from address",
+    // The label is recorded, not just the coordinates, because the whole
+    // risk with bulk geocoding informal addresses is a confident match on
+    // the wrong place - and "what did it think this was?" is the question
+    // you need answered when a pin looks wrong three weeks later.
+    detail: `Matched "${best.label}". Worth confirming - this was matched automatically.`,
+    data: { label: best.label, latitude: best.latitude, longitude: best.longitude },
+    actorUserId: req.userId,
+  });
+  res.json({ located: true, kit: publicKit(rows[0]), match: best });
+});
+
+// ===================================================================
+// Spreadsheet import
+// ===================================================================
+
+// Rows arrive already parsed into objects by the client (it has the
+// file; shipping the raw .xlsx here would mean multipart handling and an
+// Excel parser on the server for no gain). Everything that decides what
+// actually lands in the database - validation, date interpretation,
+// duplicate matching - happens HERE rather than there, because the
+// client is not a trustworthy validator and this endpoint is reachable
+// without it.
+//
+// Always runs as a dry run first from the UI: same request with
+// dry_run true returns exactly what would happen, row by row, writing
+// nothing. The commit then re-parses from scratch rather than trusting
+// the preview, so a tampered or stale preview can't smuggle anything in.
+router.post("/import", async (req, res) => {
+  const {
+    rows, mapping, day_first = true, organization_id = null, on_duplicate = "skip",
+    skip_invalid = true, dry_run = false,
+    // "account_sheet" parses an operator's own Starlink account export
+    // (identity is the account email, status is Starlink's vocabulary,
+    // amounts carry their own currency); "kits" is the generic
+    // one-row-per-kit shape.
+    profile = "kits",
+  } = req.body || {};
+  const accountSheet = profile === "account_sheet";
+
+  if (!Array.isArray(rows) || rows.length === 0) return res.status(400).json({ error: "no rows to import" });
+  if (rows.length > 2000) return res.status(400).json({ error: "that's more than 2000 rows - split the file and import in batches" });
+  if (accountSheet ? !mapping?.account_email : !mapping?.name) {
+    return res.status(400).json({
+      error: accountSheet ? "a column has to be mapped to the account email" : "a column has to be mapped to the kit name",
+    });
+  }
+  if (!["skip", "update", "create"].includes(on_duplicate)) return res.status(400).json({ error: "invalid duplicate handling" });
+
+  if (organization_id) {
+    const allowed = await requireOrgRole(req.userId, organization_id, "admin");
+    if (!allowed) return res.status(403).json({ error: "you need admin access on that organization to import kits into it" });
+  }
+
+  const parse = accountSheet ? parseAccountRow : parseRow;
+  const parsed = rows.map((row, i) => parse(row, mapping, { dayFirst: day_first, rowNumber: i + 2 }));
+  const internalDuplicates = findInternalDuplicates(parsed);
+
+  // Existing kits are matched on service line first (a real identifier,
+  // if the sheet has one) and otherwise on name + client, case-
+  // insensitively. Scoped to what this user can already see, so an
+  // import can never discover or overwrite someone else's kit.
+  const { rows: existing } = await pool.query(
+    `SELECT id, name, client_name, service_line, account_email FROM kits
+     WHERE user_id = $1 OR organization_id IN (SELECT organization_id FROM organization_members WHERE user_id = $1)`,
+    [req.userId]
+  );
+  const byEmail = new Map();
+  const bySer = new Map();
+  const byName = new Map();
+  for (const k of existing) {
+    if (k.account_email) byEmail.set(k.account_email.toLowerCase(), k);
+    if (k.service_line) bySer.set(k.service_line.toLowerCase(), k);
+    byName.set(`${(k.name || "").toLowerCase()}::${(k.client_name || "").toLowerCase()}`, k);
+  }
+  // Account email is the strongest identifier available and is checked
+  // first: it's what the operator's own records are keyed on, it doesn't
+  // change when someone retypes a site name, and it's what makes
+  // re-uploading an updated sheet an update rather than 146 duplicates.
+  const matchExisting = (kit) =>
+    (kit.account_email && byEmail.get(kit.account_email.toLowerCase())) ||
+    (kit.service_line && bySer.get(kit.service_line.toLowerCase())) ||
+    byName.get(`${(kit.name || "").toLowerCase()}::${(kit.client_name || "").toLowerCase()}`) ||
+    null;
+
+  const plan = parsed.map((entry) => {
+    if (!entry.ok) return { ...entry, action: "error" };
+    const dupeOf = internalDuplicates.find((d) => d.rowNumber === entry.rowNumber);
+    if (dupeOf) {
+      return { ...entry, action: "skip", reason: `duplicate of row ${dupeOf.firstSeenAt} in this file` };
+    }
+    const match = matchExisting(entry.kit);
+    if (match) {
+      if (on_duplicate === "skip") return { ...entry, action: "skip", reason: "a kit with this name/client already exists", existingId: match.id };
+      if (on_duplicate === "update") return { ...entry, action: "update", existingId: match.id };
+    }
+    return { ...entry, action: "create" };
+  });
+
+  const summary = {
+    total: plan.length,
+    create: plan.filter((p) => p.action === "create").length,
+    update: plan.filter((p) => p.action === "update").length,
+    skip: plan.filter((p) => p.action === "skip").length,
+    error: plan.filter((p) => p.action === "error").length,
+    warnings: plan.filter((p) => p.warnings.length > 0).length,
+  };
+
+  if (dry_run) return res.json({ dry_run: true, summary, rows: plan });
+  if (summary.error > 0 && !skip_invalid) {
+    return res.status(400).json({ error: `${summary.error} row(s) have problems - fix them or choose to skip invalid rows`, summary, rows: plan });
+  }
+
+  // One transaction for the whole file. A half-finished import is worse
+  // than none: the user can't tell which rows landed without reading
+  // every kit, and re-running would then create duplicates of the half
+  // that did.
+  const client = await pool.connect();
+  const created = [];
+  const updated = [];
+  try {
+    await client.query("BEGIN");
+    for (const entry of plan) {
+      if (entry.action === "create") {
+        const k = entry.kit;
+        const { rows: ins } = await client.query(
+          `INSERT INTO kits (user_id, organization_id, name, client_name, service_line, kit_serial, hardware_model, notes,
+             plan_name, plan_amount, plan_currency, next_due_at, last_paid_at, last_active_at,
+             address, city, region, country, latitude, longitude, geocode_source,
+             account_email, account_condition, outstanding_amount, outstanding_currency, overdue_since,
+             last_payment_amount, last_payment_currency, billing_state)
+           VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22,$23,$24,$25,$26,$27,$28,
+             COALESCE($29,'active')) RETURNING id`,
+          [
+            req.userId, organization_id, k.name, k.client_name ?? null, k.service_line ?? null, k.kit_serial ?? null,
+            k.hardware_model ?? null, k.notes ?? null,
+            k.plan_name ?? null, k.plan_amount ?? null, k.plan_currency || k.outstanding_currency || "NGN",
+            k.next_due_at ?? null, k.last_paid_at ?? null, k.last_active_at ?? null,
+            k.address ?? null, k.city ?? null, k.region ?? null, k.country ?? null, k.latitude ?? null, k.longitude ?? null,
+            k.latitude == null ? null : "manual",
+            k.account_email ?? null, k.account_condition ?? null,
+            k.outstanding_amount ?? null, k.outstanding_currency ?? null, k.overdue_since ?? null,
+            k.last_payment_amount ?? null, k.last_payment_currency ?? null,
+            k._statusBilling ?? null,
+          ]
+        );
+        created.push(ins[0].id);
+      } else if (entry.action === "update") {
+        const k = entry.kit;
+        // COALESCE on the incoming value, not the stored one: a blank
+        // cell in the sheet means "this column wasn't filled in", never
+        // "clear what's already there". An import should be able to add
+        // information to existing kits without destroying any.
+        await client.query(
+          `UPDATE kits SET
+             client_name = COALESCE($2, client_name), service_line = COALESCE($3, service_line),
+             kit_serial = COALESCE($4, kit_serial), hardware_model = COALESCE($5, hardware_model),
+             notes = COALESCE($6, notes), plan_amount = COALESCE($7, plan_amount),
+             plan_currency = COALESCE($8, plan_currency), next_due_at = COALESCE($9, next_due_at),
+             last_paid_at = COALESCE($10, last_paid_at), last_active_at = COALESCE($11, last_active_at),
+             address = COALESCE($12, address), city = COALESCE($13, city), region = COALESCE($14, region),
+             country = COALESCE($15, country), latitude = COALESCE($16, latitude), longitude = COALESCE($17, longitude),
+             plan_name = COALESCE($18, plan_name),
+             account_email = COALESCE($19, account_email),
+             -- The three below are the moving parts of an operator's
+             -- sheet, and they're the reason re-uploading has to be a
+             -- real update: a balance that has been cleared, or a
+             -- condition that has been resolved, must be able to go back
+             -- to empty. COALESCE would pin them at their old value
+             -- forever, so a re-import could never record good news.
+             account_condition = $20,
+             outstanding_amount = $21,
+             outstanding_currency = $22,
+             overdue_since = COALESCE($23, overdue_since),
+             last_payment_amount = COALESCE($24, last_payment_amount),
+             last_payment_currency = COALESCE($25, last_payment_currency),
+             billing_state = COALESCE($26, billing_state),
+             updated_at = now()
+           WHERE id = $1`,
+          [
+            entry.existingId, k.client_name ?? null, k.service_line ?? null, k.kit_serial ?? null, k.hardware_model ?? null,
+            k.notes ?? null, k.plan_amount ?? null, k.plan_currency ?? null, k.next_due_at ?? null, k.last_paid_at ?? null,
+            k.last_active_at ?? null, k.address ?? null, k.city ?? null, k.region ?? null, k.country ?? null,
+            k.latitude ?? null, k.longitude ?? null, k.plan_name ?? null,
+            k.account_email ?? null, k.account_condition ?? null,
+            k.outstanding_amount ?? null, k.outstanding_currency ?? null, k.overdue_since ?? null,
+            k.last_payment_amount ?? null, k.last_payment_currency ?? null, k._statusBilling ?? null,
+          ]
+        );
+        updated.push(entry.existingId);
+      }
+    }
+    await client.query("COMMIT");
+  } catch (err) {
+    await client.query("ROLLBACK").catch(() => {});
+    console.error("Import failed:", err.message);
+    return res.status(500).json({ error: "the import failed and nothing was changed" });
+  } finally {
+    client.release();
+  }
+
+  // Timeline entries and billing derivation happen after the commit, not
+  // inside it. Both are per-kit and non-essential to the import being
+  // correct; letting either fail the transaction would mean losing a
+  // clean 300-row import over one bad event write. The billing state
+  // resync matters because an imported kit with a due date last month
+  // should read as Grace or Suspended immediately, not stay Active until
+  // the next cron tick.
+  // Only kits that actually have a due date get their billing state
+  // recomputed. This matters for operator sheets: a suspended account
+  // usually has NO next bill date, and deriveBillingState reads a
+  // missing due date as 'active' - so resyncing those would quietly
+  // flip every suspended kit in the file to Active, which is both wrong
+  // and exactly backwards from what the sheet said. Where the sheet
+  // asserts a state and gives nothing to derive from, the sheet wins.
+  const resyncIfDated = async (id) => {
+    const { rows: r } = await pool.query(`SELECT next_due_at FROM kits WHERE id = $1`, [id]);
+    if (r[0]?.next_due_at) await resyncBillingState(id, req.userId);
+  };
+  for (const id of created) {
+    await recordKitEvent(id, { kind: "kit_created", title: "Imported from a spreadsheet", actorUserId: req.userId });
+    await resyncIfDated(id);
+  }
+  for (const id of updated) {
+    await recordKitEvent(id, { kind: "kit_created", severity: "info", title: "Updated by a spreadsheet import", actorUserId: req.userId });
+    await resyncIfDated(id);
+  }
+  if (organization_id) {
+    await logOrgAction(organization_id, req.userId, "kits_imported", `imported ${created.length} kit(s), updated ${updated.length}`);
+  }
+
+  res.json({ imported: created.length, updated: updated.length, summary, rows: plan });
 });
 
 export default router;

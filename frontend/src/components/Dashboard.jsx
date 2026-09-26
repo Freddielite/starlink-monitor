@@ -7,11 +7,11 @@ import ConfirmDialog from "./ConfirmDialog.jsx";
 import Dropdown from "./Dropdown.jsx";
 import { FleetMap } from "./FleetMap.jsx";
 import { refreshKits, snoozeKit, unsnoozeKit, markSeen, deleteKit, listOrganizations } from "../api.js";
-import { isIdle, isSnoozed, urgencyRank } from "../lib/kitDisplay.js";
+import { isIdle, isSnoozed, urgencyRank, needsChecking } from "../lib/kitDisplay.js";
 
 const ANY = "__any__";
 
-export default function Dashboard({ kits, loading, onSelect, onAdd, onChanged, currentUser, toast }) {
+export default function Dashboard({ kits, loading, onSelect, onAdd, onImport, onChanged, currentUser, toast }) {
   const [view, setView] = useState("list");
   const [colorBy, setColorBy] = useState("billing");
   const [client, setClient] = useState(ANY);
@@ -52,6 +52,7 @@ export default function Dashboard({ kits, loading, onSelect, onAdd, onChanged, c
         if (state === ANY) return true;
         if (state === "offline") return k.hardware_state === "offline";
         if (state === "idle") return isIdle(k);
+        if (state === "checking") return needsChecking(k);
         if (state === "overdue") return k.billing_state === "grace" || k.billing_state === "suspended";
         return k.billing_state === state;
       })
@@ -65,6 +66,7 @@ export default function Dashboard({ kits, loading, onSelect, onAdd, onChanged, c
   const overdue = kits.filter((k) => k.billing_state === "grace" || k.billing_state === "suspended").length;
   const offline = kits.filter((k) => k.hardware_state === "offline").length;
   const idleCount = kits.filter(isIdle).length;
+  const checkCount = kits.filter(needsChecking).length;
 
   async function handleRefresh() {
     setRefreshing(true);
@@ -130,12 +132,16 @@ export default function Dashboard({ kits, loading, onSelect, onAdd, onChanged, c
                 <Stat value={overdue} label="Overdue" color={overdue > 0 ? "var(--alert)" : undefined} />
                 <Stat value={offline} label="Offline" color={offline > 0 ? "var(--alert)" : undefined} />
                 <Stat value={idleCount} label="Idle" color={idleCount > 0 ? "var(--amber)" : undefined} />
+                {checkCount > 0 && <Stat value={checkCount} label="Check" color="var(--orange)" />}
               </>
             )}
           </div>
           <div className="sl-dashboard-actions">
             <button className="sl-btn sl-btn--ghost" onClick={handleRefresh} disabled={refreshing || kits.length === 0}>
               {refreshing ? "Refreshing..." : "Refresh"}
+            </button>
+            <button className="sl-btn sl-btn--ghost" onClick={onImport}>
+              Import
             </button>
             <button className="sl-btn" onClick={onAdd}>
               Add kit
@@ -177,6 +183,7 @@ export default function Dashboard({ kits, loading, onSelect, onAdd, onChanged, c
                 { value: "suspended", label: "Suspended" },
                 { value: "offline", label: "Hardware offline" },
                 { value: "idle", label: "Idle" },
+                { value: "checking", label: "Needs checking" },
                 { value: "cancelled", label: "Cancelled" },
               ]}
             />
@@ -204,6 +211,11 @@ export default function Dashboard({ kits, loading, onSelect, onAdd, onChanged, c
             <div className="sl-panel sl-empty">
               <div className="sl-empty__title">No kits yet</div>
               <div>Add the first kit you're tracking - who it's for, what it costs, and when the next payment is due.</div>
+              <div style={{ marginTop: 10 }}>
+                <button className="sl-linkbtn" onClick={onImport}>
+                  Or import a spreadsheet you already keep
+                </button>
+              </div>
             </div>
           )
         ) : view === "map" ? (

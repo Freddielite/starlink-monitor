@@ -172,6 +172,31 @@ have produced a map quietly full of city centroids.
   one atomic upsert and doesn't care which connection runs it. The
   trade-off is that a tick killed mid-run holds the lock until its
   10-minute lease expires, instead of releasing instantly on disconnect.
+- **Spreadsheet import parses on the client, validates on the server.**
+  The browser turns the file into rows (shipping an .xlsx to the backend
+  would mean multipart handling and an Excel parser server-side for no
+  gain), but every decision about what lands in the database - validation,
+  date interpretation, duplicate matching - happens in `lib/importKits.js`
+  on the server, because `/api/kits/import` is reachable without the UI.
+  The commit re-parses from scratch rather than trusting the preview.
+- **Import is capped at 2000 rows** per request, with a 4mb body limit on
+  that route only.
+- **Excel date serials are only accepted in a narrow window** (~2009 to
+  2050). A wider range looks more tolerant but is worse here: a plain
+  naira amount that landed in a date column sits comfortably inside any
+  generous range and would silently become a date.
+- **Operator sheets carry no location data at all**, so imported kits
+  have no map pins and the map view is empty for them until addresses
+  are added. Nothing in the sheet can be geocoded - there is no address
+  column to geocode.
+- **`last_active_at` mined from notes is approximate by construction.** A
+  bare month name has no year, so it resolves to the most recent one
+  already past. It drives idle alerts, whose thresholds are measured in
+  weeks, so the imprecision is well inside tolerance - but it is an
+  inference from prose, not an observation.
+- **Rows with no account email are rejected**, not imported. They can't
+  be identified or re-matched, so importing them would create fresh
+  duplicates on every subsequent upload.
 - **Org-level custom domain is a note to yourself, not a feature.**
   Carried over from Pulse: the field records what you'd need to set up
   (a CNAME plus host routing/TLS), it doesn't do any of it.
@@ -229,6 +254,46 @@ original locking:
 - An expired lease (i.e. a crashed run) → reclaimed, sweeps ran.
 - A stale run attempting to release a lock a second instance now holds →
   refused by the holder guard.
+
+Spreadsheet import, 34 unit assertions over the parsing plus end-to-end
+against the API:
+
+- Money: `₦38,000.00`, `NGN 38,000`, `38 000`, `1.234,56`, `1,234.56`,
+  `45,5` and bare numbers all parse; junk is reported rather than
+  silently becoming null.
+- Dates: ISO, `25/03/2026`, `03/25/2026`, textual months and Excel
+  serials all parse; genuinely ambiguous values are flagged with which
+  order was assumed; `32/01/2026` and `13/13/2026` are rejected; a bare
+  `38000` in a date column is rejected rather than read as a 2004 date.
+- Column guessing against deliberately awkward headers ("Site Name",
+  "Monthly Cost", "Town", "Client Address") mapped all seven correctly,
+  including not letting "Client Address" claim the client field.
+- A five-row messy sheet produced: 3 creates, 1 in-file duplicate
+  skipped, 1 row with all three of its problems reported at once.
+- Re-importing the same file created 0 duplicates; with `update` it
+  filled blanks on the 3 existing kits instead.
+- Imported kits had billing state derived on commit (a due date in the
+  past landed as `suspended`, not `active`).
+- A forced mid-transaction constraint violation rolled back cleanly -
+  kit count unchanged, nothing partially written.
+
+Against the real 153-row operator spreadsheet:
+
+- Sheet shape auto-detected; 10 of 11 columns mapped with no manual
+  input (only "S/N" left unmapped, correctly).
+- 146 rows parsed, 7 rejected - all 7 genuinely having no account email.
+  5 further rows skipped as in-file duplicates, 141 imported.
+- Currencies split exactly as the source did: 43 NGN, 31 EUR, 5 HUF.
+- All 141 password cells dropped; no credential value reached any kit
+  record (verified by searching every returned kit for the password).
+- 27 non-billing account conditions extracted rather than being
+  flattened into a billing state.
+- 21 `last_active_at` values inferred from note prose.
+- Re-importing the identical file: 0 created, 141 updated, count stable
+  at 141 across three consecutive imports.
+- Simulated next-month sheet where one client paid and one unverifiable
+  account resolved: balance cleared to empty, condition cleared, still
+  141 kits.
 
 Not verified here: live email/push/Telegram/webhook delivery (needs real
 credentials), a successful Nominatim lookup (the build sandbox blocks

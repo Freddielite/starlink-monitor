@@ -73,6 +73,74 @@ A kit nobody has ever marked as seen reads as "never seen", not as
 infinitely idle - so switching this on for an existing fleet doesn't
 flood the alert channel.
 
+## Importing an existing fleet
+
+Kits can be imported from CSV or Excel. The flow is deliberately three
+steps - pick a file, confirm the column mapping, preview - because an
+import writes to every kit at once and a silent mistake is expensive.
+
+- **Columns are matched by name**, generously ("Monthly Cost", "Next
+  Payment Date", "Town" all land correctly), and anything it gets wrong
+  you remap by hand before anything is written.
+- **Messy values are handled**: `NGN 38,000` / `38 000` / `1.234,56` all
+  parse, as do ISO dates, `25/03/2026`, `5 Jan 2026`, and raw Excel date
+  serials.
+- **Ambiguous dates are reported, not guessed.** `05/03/2026` could be
+  either order; you choose which, and every row that relied on that
+  choice is flagged in the preview.
+- **Re-importing the same sheet is safe.** Kits are matched on service
+  line, or on name + client, and duplicates are skipped by default. You
+  can also choose to have the sheet fill in blanks on existing kits -
+  which never overwrites data you already have, since an empty cell
+  means "not filled in", not "clear this".
+- **All or nothing.** The whole file imports in one transaction. A
+  half-finished import is worse than none, because you can't tell which
+  rows landed without reading every kit.
+- Imported kits get their billing state derived immediately, so anything
+  already past due shows as Grace or Suspended right away rather than
+  waiting for the next sweep.
+
+Addresses without coordinates import unlocated, and there's a one-at-a-
+time backfill afterwards - bulk geocoding is precisely what Nominatim's
+rate limit forbids, so it runs at about a second each, can be stopped,
+and can be resumed later.
+
+### Operator account sheets
+
+The importer recognises the shape an operator's own Starlink records
+actually take - one row per **account login**, Starlink's own status
+wording, balances in mixed currencies - and switches to a different
+mapping automatically when it sees an email column and a status column
+together.
+
+What it does with that shape:
+
+- **Identity is the account email.** Nobody names these kits; the login
+  is the identifier, and it's the only value stable enough that
+  re-uploading next month's copy updates the fleet instead of doubling
+  it. A display name is derived from the local part (or from a
+  `(Chief Soso Office)` style prefix where one exists).
+- **Passwords are never stored.** Operator sheets routinely carry them.
+  The column is read, ignored, and reported as ignored. A tracking tool
+  has no use for a credential that grants full control of the service,
+  and holding it would turn a database leak into a fleet takeover.
+- **Status is split in two.** `Overdue` and `Suspended (Billing)` are
+  billing states. `Email Not Found`, `No Device`, `Transferred`,
+  `Restricted (Location)` are not - they're problems with the record,
+  and they go in a separate `account_condition` field with its own
+  count and filter on the dashboard. Collapsing them would make an
+  unverifiable account look healthy.
+- **Currency is read per row.** `€95`, `₦49,000` and `34,000 HUF` in one
+  column is normal, and what's owed travels with its own currency
+  rather than being assumed from the kit.
+- **Usage is mined from the notes.** "Last used in March" / "Not in use
+  since January" is the only usage signal these sheets carry, so it's
+  parsed into `last_active_at` and marked approximate. Without it the
+  idle axis would sit empty on a fleet that is visibly full of idle kits.
+- **Re-importing reflects good news.** A cleared balance or a resolved
+  condition goes back to empty on update, rather than being pinned at its
+  old value the way a blank-means-ignore rule would.
+
 ## Location and the map
 
 Structured location per kit (address / city / region / country / lat /

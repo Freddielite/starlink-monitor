@@ -28,8 +28,17 @@ export default function KitCard({ kit, onClick }) {
           {kit.name}
           {snoozed && <span className="sl-badge sl-badge--muted">muted {timeUntil(kit.snoozed_until)}</span>}
         </div>
-        {kit.client_name && <div className="sl-kit-card__client">{kit.client_name}</div>}
+        {(kit.client_name || kit.account_email) && (
+          <div className="sl-kit-card__client">{kit.client_name || kit.account_email}</div>
+        )}
       </div>
+
+      {/* An account condition outranks everything else on the card. A
+          kit whose login can't be found has no trustworthy billing
+          state at all, so saying "Active" without this line next to it
+          would be the card confidently reporting something it can't
+          know. */}
+      {kit.account_condition && <div className="sl-kit-card__condition">{kit.account_condition}</div>}
 
       <div className="sl-axes">
         {/* Each axis gets an identical slot regardless of its value, so
@@ -41,6 +50,7 @@ export default function KitCard({ kit, onClick }) {
           value={BILLING_LABELS[kit.billing_state] || kit.billing_state}
           color={BILLING_COLORS[kit.billing_state]}
           sub={kit.billing_state === "cancelled" ? null : dueLabel(kit)}
+          muted={!!kit.account_condition}
         />
         <Axis
           label="Hardware"
@@ -57,18 +67,26 @@ export default function KitCard({ kit, onClick }) {
       </div>
 
       <div className="sl-kit-card__foot">
-        <span>{[kit.city, kit.region].filter(Boolean).join(", ") || "No location set"}</span>
-        {money(kit.plan_amount, kit.plan_currency) && <span>{money(kit.plan_amount, kit.plan_currency)}</span>}
+        <span>{[kit.city, kit.region].filter(Boolean).join(", ") || kit.plan_name || "No location set"}</span>
+        {/* Outstanding balance wins over the plan price here: what's
+            owed right now is the number you act on, and these fleets are
+            billed in several currencies at once so it always carries
+            its own. */}
+        {kit.outstanding_amount ? (
+          <span style={{ color: "var(--alert)" }}>{money(kit.outstanding_amount, kit.outstanding_currency)} owing</span>
+        ) : (
+          money(kit.plan_amount, kit.plan_currency) && <span>{money(kit.plan_amount, kit.plan_currency)}</span>
+        )}
       </div>
     </div>
   );
 }
 
-function Axis({ label, value, color, sub }) {
+function Axis({ label, value, color, sub, muted }) {
   return (
     <div className="sl-axis">
       <div className="sl-axis__label">{label}</div>
-      <div className="sl-axis__value" style={{ color }}>
+      <div className="sl-axis__value" style={{ color: muted ? "var(--ink-faint)" : color }}>
         {value}
       </div>
       <div className="sl-axis__sub">{sub || "\u00a0"}</div>

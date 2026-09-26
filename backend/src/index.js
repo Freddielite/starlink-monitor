@@ -54,6 +54,10 @@ app.use(securityHeaders());
 // comfortably past the ceiling every other endpoint is sized for.
 // Registered first so it wins for matching paths.
 app.use("/api/organizations", express.json({ limit: "1mb" }));
+// A spreadsheet import is a few hundred rows of JSON in one request -
+// comfortably past the 64kb ceiling the rest of the API is sized for,
+// and capped server-side at 2000 rows in the route itself.
+app.use("/api/kits/import", express.json({ limit: "4mb" }));
 app.use(express.json({ limit: "64kb" }));
 
 const PgSession = connectPgSimple(session);
