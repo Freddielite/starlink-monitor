@@ -809,7 +809,11 @@ a {
   top: calc(100% + 6px);
   left: 0;
   right: 0;
-  z-index: 40;
+  /* Above the fixed tab bar (z-index 100). An open menu is a modal-ish
+     thing the user is actively looking at; nothing should sit over it.
+     It also opens upward near the bottom of the screen (see below), so
+     in practice it rarely needs to overlap the bar at all. */
+  z-index: 120;
   background: var(--bg-alt);
   border: 1px solid var(--panel-border);
   border-radius: 9px;
@@ -819,6 +823,14 @@ a {
   overflow-y: auto;
   box-shadow: 0 12px 30px -10px rgba(0, 0, 0, 0.6);
   list-style: none;
+}
+
+/* Anchored to the trigger's top edge instead of its bottom, with the
+   shadow flipped so it still falls away from the control. */
+.sl-dropdown__menu--up {
+  top: auto;
+  bottom: calc(100% + 6px);
+  box-shadow: 0 -12px 30px -10px rgba(0, 0, 0, 0.6);
 }
 
 .sl-dropdown__option {
@@ -2330,11 +2342,18 @@ a {
 }
 
 @media (max-width: 560px) {
-  /* Stacked on a phone, with the controls centred: three items side by
-     side at this width squeezes the buttons below a comfortable tap
-     target. */
+  /* A single column on a phone. The previous version kept everything on
+     one wrapping row, which left the range and the page-size control
+     sharing a line and each squeezed to about half the width - the
+     range hard against the dropdown, with neither reading as a distinct
+     thing. Stacked, each row does one job:
+       1. the controls, spread edge to edge for comfortable thumb reach
+       2. the range, centred, as the quiet status line it is
+       3. the page-size control, full width, so it's a proper tap target */
   .sl-pager {
-    justify-content: center;
+    flex-direction: column;
+    align-items: stretch;
+    gap: 14px;
     text-align: center;
   }
 
@@ -2342,5 +2361,15 @@ a {
     order: -1;
     width: 100%;
     justify-content: space-between;
+  }
+
+  /* The two arrows are the frequent action and want real tap targets;
+     the page indicator between them shouldn't push them inward. */
+  .sl-pager__controls .sl-btn {
+    min-width: 92px;
+  }
+
+  .sl-pager .sl-dropdown {
+    width: 100%;
   }
 }

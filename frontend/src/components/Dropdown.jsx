@@ -8,7 +8,14 @@ import { useEffect, useRef, useState } from "react";
 // existing sl-field without changing the surrounding form logic.
 export default function Dropdown({ value, onChange, options, placeholder = "Select..." }) {
   const [open, setOpen] = useState(false);
+  // Whether the menu opens upward. Measured rather than assumed: a
+  // dropdown near the bottom of a phone screen that always opens
+  // downward puts its options underneath the fixed tab bar, where they
+  // can't be read or tapped. Raising the z-index alone would only mean
+  // covering the navigation instead.
+  const [dropUp, setDropUp] = useState(false);
   const rootRef = useRef(null);
+  const triggerRef = useRef(null);
 
   useEffect(() => {
     if (!open) return;
@@ -26,11 +33,40 @@ export default function Dropdown({ value, onChange, options, placeholder = "Sele
     };
   }, [open]);
 
+  // Recomputed every time it opens, and again on scroll or resize while
+  // it's open, because the same control can be comfortably mid-screen
+  // one moment and against the bottom edge the next.
+  useEffect(() => {
+    if (!open) return;
+    const place = () => {
+      const rect = triggerRef.current?.getBoundingClientRect();
+      if (!rect) return;
+      // Matches .sl-dropdown__menu's max-height, plus its 6px offset and
+      // a little breathing room, so the decision is made against the
+      // space the menu will actually want.
+      const needed = Math.min(240, options.length * 38 + 8) + 14;
+      const below = window.innerHeight - rect.bottom;
+      const above = rect.top;
+      // Only flips when there genuinely isn't room below AND there's
+      // more room above - otherwise a cramped screen would flip it into
+      // somewhere equally cramped.
+      setDropUp(below < needed && above > below);
+    };
+    place();
+    window.addEventListener("resize", place);
+    window.addEventListener("scroll", place, true);
+    return () => {
+      window.removeEventListener("resize", place);
+      window.removeEventListener("scroll", place, true);
+    };
+  }, [open, options.length]);
+
   const selected = options.find((o) => o.value === value);
 
   return (
     <div className="sl-dropdown" ref={rootRef}>
       <button
+        ref={triggerRef}
         type="button"
         className="sl-dropdown__trigger"
         onClick={() => setOpen((o) => !o)}
@@ -43,7 +79,7 @@ export default function Dropdown({ value, onChange, options, placeholder = "Sele
         </svg>
       </button>
       {open && (
-        <ul className="sl-dropdown__menu" role="listbox">
+        <ul className={`sl-dropdown__menu${dropUp ? " sl-dropdown__menu--up" : ""}`} role="listbox">
           {options.map((opt) => (
             <li
               key={opt.value}
