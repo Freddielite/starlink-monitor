@@ -39,6 +39,19 @@ export default function ModalOverlay({ open, onCancel, closeOnBackdrop = true, c
     return () => clearTimeout(timer);
   }, [open, rendered]);
 
+  // Escape closes anything cancellable. Deliberately not gated on
+  // closeOnBackdrop: that flag exists to stop a stray tap outside the
+  // panel from discarding typed work, which is an accident. Pressing
+  // Escape is not an accident.
+  useEffect(() => {
+    if (!open || !onCancel) return;
+    const onKey = (e) => {
+      if (e.key === "Escape") onCancel();
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [open, onCancel]);
+
   if (!rendered) return null;
 
   return createPortal(

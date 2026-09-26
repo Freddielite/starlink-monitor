@@ -207,9 +207,32 @@ export default function ImportKits({ onClose, onDone, toast }) {
   const mappedCount = useMemo(() => Object.values(cleanMapping(mapping)).filter(Boolean).length, [mapping]);
 
   return (
-    <ModalOverlay open onCancel={busy ? undefined : onClose} closeOnBackdrop={false}>
+    <ModalOverlay
+      open
+      onCancel={busy || geocoding ? undefined : onClose}
+      // Tapping outside is allowed where there's nothing to lose - the
+      // file picker and the final summary. On the mapping and preview
+      // screens the user has made choices worth protecting from a stray
+      // tap, and mid-import or mid-geocode it's blocked entirely. The
+      // close button below is always there regardless, so no stage can
+      // ever be a dead end.
+      closeOnBackdrop={!busy && !geocoding && (stage === "file" || stage === "done")}
+    >
       <div className={`sl-panel sl-modal${stage === "file" ? "" : " sl-modal--wide"}`} onClick={(e) => e.stopPropagation()}>
-        <div className="sl-modal__title">Import kits from a spreadsheet</div>
+        <div className="sl-modal__head">
+          <div className="sl-modal__title">Import kits from a spreadsheet</div>
+          <button
+            type="button"
+            className="sl-modal__close"
+            aria-label="Close"
+            onClick={onClose}
+            disabled={busy || !!geocoding}
+          >
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round">
+              <path d="M6 6l12 12M18 6L6 18" />
+            </svg>
+          </button>
+        </div>
 
         {stage === "file" && (
           <>

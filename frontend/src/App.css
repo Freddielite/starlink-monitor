@@ -2162,3 +2162,52 @@ a {
 .sl-dropzone > * {
   pointer-events: none;
 }
+
+/* Modal header with a close affordance. Every modal needs a visible way
+   out that isn't the backdrop: on a phone there's no Escape key, and a
+   panel whose only exits are a backdrop tap and a Cancel button becomes
+   a dead end the moment either is missing. */
+.sl-modal__head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.sl-modal__head .sl-modal__title {
+  margin-bottom: 16px;
+}
+
+.sl-modal__close {
+  flex: 0 0 auto;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  /* 36px, not the 20px the glyph needs: this is a small target in the
+     corner of a phone screen and an under-sized one is the difference
+     between closing the sheet and re-opening it. */
+  width: 36px;
+  height: 36px;
+  margin: -6px -6px 0 0;
+  border: 0;
+  border-radius: 10px;
+  background: transparent;
+  color: var(--ink-faint);
+  cursor: pointer;
+  transition: background 0.15s ease, color 0.15s ease;
+}
+
+.sl-modal__close svg {
+  width: 17px;
+  height: 17px;
+}
+
+.sl-modal__close:hover:not(:disabled) {
+  background: var(--panel);
+  color: var(--ink);
+}
+
+.sl-modal__close:disabled {
+  opacity: 0.35;
+  cursor: default;
+}
