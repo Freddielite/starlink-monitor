@@ -4,10 +4,11 @@ import KitCardSkeleton from "./KitCardSkeleton.jsx";
 import SwipeableRow from "./SwipeableRow.jsx";
 import PullToRefresh from "./PullToRefresh.jsx";
 import ConfirmDialog from "./ConfirmDialog.jsx";
+import ModalOverlay from "./ModalOverlay.jsx";
 import Dropdown from "./Dropdown.jsx";
 import { FleetMap } from "./FleetMap.jsx";
-import { refreshKits, snoozeKit, unsnoozeKit, markSeen, deleteKit, listOrganizations } from "../api.js";
-import { isIdle, isSnoozed, urgencyRank, needsChecking } from "../lib/kitDisplay.js";
+import { refreshKits, snoozeKit, unsnoozeKit, markSeen, deleteKit, listOrganizations, bulkKitAction } from "../api.js";
+import { isIdle, isSnoozed, urgencyRank, needsChecking, outstandingByCurrency, formatTotal } from "../lib/kitDisplay.js";
 
 const ANY = "__any__";
 
@@ -24,6 +25,14 @@ export default function Dashboard({ kits, loading, onSelect, onAdd, onImport, on
   const [page, setPage] = useState(1);
   const [pageSize, setPageSize] = useState(20);
   const searchRef = useRef(null);
+  // Selection is opt-in rather than always-on: a checkbox on every card
+  // is permanent clutter for the common case of just reading the list,
+  // and on a phone it competes with the swipe actions for the same
+  // gesture space.
+  const [selecting, setSelecting] = useState(false);
+  const [selected, setSelected] = useState(() => new Set());
+  const [bulkBusy, setBulkBusy] = useState(false);
+  const [confirmBulk, setConfirmBulk] = useState(null);
 
   useEffect(() => {
     listOrganizations()
@@ -124,6 +133,13 @@ export default function Dashboard({ kits, loading, onSelect, onAdd, onImport, on
   const offline = kits.filter((k) => k.hardware_state === "offline").length;
   const idleCount = kits.filter(isIdle).length;
   const checkCount = kits.filter(needsChecking).length;
+  // Fleet-wide, matching the counts above. The filtered total is shown
+  // alongside only when it differs, so narrowing to one client answers
+  // "what do they owe me" without the headline number ever moving
+  // under you.
+  const owed = useMemo(() => outstandingByCurrency(kits), [kits]);
+  const owedFiltered = useMemo(() => outstandingByCurrency(filtered), [filtered]);
+  const filteredDiffers = filtered.length !== kits.length;
 
   async function handleRefresh() {
     setRefreshing(true);
@@ -138,6 +154,48 @@ export default function Dashboard({ kits, loading, onSelect, onAdd, onImport, on
     }
   }
 
+  function toggleSelected(id) {
+    setSelected((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+  }
+
+  // Selects what's on screen after filtering, not the whole fleet.
+  // "Select all" meaning 141 kits when you can see 20 is how someone
+  // marks the wrong things as paid.
+  function selectAllVisible() {
+    setSelected(new Set(filtered.map((k) => k.id)));
+  }
+
+  function exitSelecting() {
+    setSelecting(false);
+    setSelected(new Set());
+  }
+
+  async function runBulk(action, payload = {}) {
+    setBulkBusy(true);
+    try {
+      const result = await bulkKitAction([...selected], action, payload);
+      const parts = [`${result.done} kit${result.done === 1 ? "" : "s"} updated`];
+      // Refusals and failures are surfaced rather than swallowed - a
+      // bulk action that quietly does less than asked is worse than one
+      // that says so.
+      if (result.refused?.length) parts.push(`${result.refused.length} skipped (no access)`);
+      if (result.failed?.length) parts.push(`${result.failed.length} failed`);
+      toast(parts.join(" · "), result.failed?.length ? "error" : undefined);
+      await onChanged();
+      exitSelecting();
+    } catch (err) {
+      toast(err.message, "error");
+    } finally {
+      setBulkBusy(false);
+      setConfirmBulk(null);
+    }
+  }
+
   async function act(fn, message) {
     try {
       await fn();
@@ -149,6 +207,31 @@ export default function Dashboard({ kits, loading, onSelect, onAdd, onImport, on
   }
 
   function renderCard(kit) {
+    if (selecting) {
+      // Swipe actions are suppressed while selecting: the same
+      // horizontal gesture would otherwise both select and reveal
+      // actions, and on a phone that's a coin toss.
+      const isOn = selected.has(kit.id);
+      return (
+        <div
+          key={kit.id}
+          className={`sl-selectable-card${isOn ? " sl-selectable-card--on" : ""}`}
+          onClick={() => toggleSelected(kit.id)}
+        >
+          <span className={`sl-checkbox${isOn ? " sl-checkbox--on" : ""}`} aria-hidden="true">
+            {isOn && (
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round">
+                <path d="M20 6L9 17l-5-5" />
+              </svg>
+            )}
+          </span>
+          <div className="sl-selectable-card__body">
+            <KitCard kit={kit} onClick={() => toggleSelected(kit.id)} />
+          </div>
+        </div>
+      );
+    }
+
     // A member with view-only access gets no swipe actions at all -
     // rather than actions that 403 on tap.
     const actions = canManage(kit)
@@ -206,6 +289,27 @@ export default function Dashboard({ kits, loading, onSelect, onAdd, onImport, on
           </div>
         </div>
 
+        {owed.length > 0 && (
+          <div className="sl-panel sl-owed">
+            <div className="sl-owed__label">Outstanding</div>
+            <div className="sl-owed__totals">
+              {owed.map((entry) => (
+                <div className="sl-owed__entry" key={entry.currency}>
+                  <span className="sl-owed__amount">{formatTotal(entry)}</span>
+                  <span className="sl-owed__kits">
+                    across {entry.kits} kit{entry.kits === 1 ? "" : "s"}
+                  </span>
+                </div>
+              ))}
+            </div>
+            {filteredDiffers && owedFiltered.length > 0 && (
+              <div className="sl-owed__filtered">
+                In this view: {owedFiltered.map(formatTotal).join(" · ")}
+              </div>
+            )}
+          </div>
+        )}
+
         <div className="sl-panel sl-filters">
           <div className="sl-toggle-group">
             <button className={view === "list" ? "active" : ""} onClick={() => setView("list")}>
@@ -215,6 +319,11 @@ export default function Dashboard({ kits, loading, onSelect, onAdd, onImport, on
               Map
             </button>
           </div>
+          {view === "list" && filtered.length > 0 && (
+            <button className="sl-btn sl-btn--ghost sl-btn--sm" onClick={() => (selecting ? exitSelecting() : setSelecting(true))}>
+              {selecting ? "Done" : "Select"}
+            </button>
+          )}
           <div className="sl-filters__selects">
             {clients.length > 0 && (
               <Dropdown
@@ -359,6 +468,74 @@ export default function Dashboard({ kits, loading, onSelect, onAdd, onImport, on
         )}
       </PullToRefresh>
 
+      {selecting && (
+        <div className="sl-bulkbar">
+          <div className="sl-bulkbar__count">
+            {selected.size} selected
+            <button className="sl-linkbtn" onClick={selectAllVisible} disabled={bulkBusy}>
+              Select all {filtered.length}
+            </button>
+            {selected.size > 0 && (
+              <button className="sl-linkbtn" onClick={() => setSelected(new Set())} disabled={bulkBusy}>
+                Clear
+              </button>
+            )}
+          </div>
+          <div className="sl-bulkbar__actions">
+            <button className="sl-btn sl-btn--sm" disabled={!selected.size || bulkBusy} onClick={() => setConfirmBulk("mark_paid")}>
+              Mark paid
+            </button>
+            <button className="sl-btn sl-btn--ghost sl-btn--sm" disabled={!selected.size || bulkBusy} onClick={() => runBulk("mark_seen")}>
+              Mark seen
+            </button>
+            <button className="sl-btn sl-btn--ghost sl-btn--sm" disabled={!selected.size || bulkBusy} onClick={() => runBulk("snooze", { minutes: 4320 })}>
+              Mute 3d
+            </button>
+            <button className="sl-btn sl-btn--ghost sl-btn--sm" disabled={!selected.size || bulkBusy} onClick={() => setConfirmBulk("set_client")}>
+              Set client
+            </button>
+            <button className="sl-btn sl-btn--danger sl-btn--sm" disabled={!selected.size || bulkBusy} onClick={() => setConfirmBulk("delete")}>
+              Delete
+            </button>
+          </div>
+        </div>
+      )}
+
+      {/* Money and deletion get a confirmation; the reversible actions
+          (mark seen, mute) don't, because a confirm on something you can
+          simply do again is friction that teaches people to tap through
+          dialogs without reading them. */}
+      <ConfirmDialog
+        open={confirmBulk === "mark_paid"}
+        title={`Record payment on ${selected.size} kit${selected.size === 1 ? "" : "s"}?`}
+        body="Each kit is credited with what it currently shows as owing, or its plan amount if there's no balance. Due dates move forward by each kit's own cycle."
+        confirmLabel="Record payments"
+        onConfirm={() => runBulk("mark_paid")}
+        onCancel={() => setConfirmBulk(null)}
+        busy={bulkBusy}
+      />
+
+      <ConfirmDialog
+        open={confirmBulk === "delete"}
+        title={`Delete ${selected.size} kit${selected.size === 1 ? "" : "s"}?`}
+        body="Their payment logs, history and heartbeats go with them. This can't be undone."
+        confirmLabel="Delete"
+        danger
+        onConfirm={() => runBulk("delete")}
+        onCancel={() => setConfirmBulk(null)}
+        busy={bulkBusy}
+      />
+
+      {confirmBulk === "set_client" && (
+        <SetClientDialog
+          count={selected.size}
+          clients={clients}
+          busy={bulkBusy}
+          onCancel={() => setConfirmBulk(null)}
+          onConfirm={(name) => runBulk("set_client", { client_name: name })}
+        />
+      )}
+
       <ConfirmDialog
         open={!!confirmingDeleteId}
         title="Delete this kit?"
@@ -373,6 +550,48 @@ export default function Dashboard({ kits, loading, onSelect, onAdd, onImport, on
         onCancel={() => setConfirmingDeleteId(null)}
       />
     </>
+  );
+}
+
+// Assigning a client across a selection is the fix for an imported
+// fleet, where every kit arrives with no client at all because the
+// source sheet has no such column. Free text with the existing names
+// offered, rather than a fixed list - the first use of this is
+// necessarily creating names that don't exist yet.
+function SetClientDialog({ count, clients, busy, onCancel, onConfirm }) {
+  const [name, setName] = useState("");
+  return (
+    <ModalOverlay open onCancel={busy ? undefined : onCancel}>
+      <div className="sl-panel sl-modal" onClick={(e) => e.stopPropagation()}>
+        <div className="sl-modal__title">
+          Set client on {count} kit{count === 1 ? "" : "s"}
+        </div>
+        <label className="sl-field">
+          <span className="sl-field__label">Client name</span>
+          <input
+            autoFocus
+            value={name}
+            onChange={(e) => setName(e.target.value)}
+            placeholder="Ajayi Ltd"
+            list="sl-existing-clients"
+          />
+          <datalist id="sl-existing-clients">
+            {clients.map((c) => (
+              <option key={c} value={c} />
+            ))}
+          </datalist>
+          <span className="sl-hint">Leave blank to clear the client on these kits.</span>
+        </label>
+        <div className="sl-modal__actions">
+          <button className="sl-btn sl-btn--ghost" onClick={onCancel} disabled={busy}>
+            Cancel
+          </button>
+          <button className="sl-btn" onClick={() => onConfirm(name)} disabled={busy}>
+            {busy ? "Saving..." : "Set client"}
+          </button>
+        </div>
+      </div>
+    </ModalOverlay>
   );
 }
 

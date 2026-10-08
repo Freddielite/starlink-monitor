@@ -2,6 +2,7 @@ import React from "react";
 import ReactDOM from "react-dom/client";
 import App from "./App.jsx";
 import VerifyEmail from "./components/VerifyEmail.jsx";
+import ResetPassword from "./components/ResetPassword.jsx";
 import "./App.css";
 
 // Belt-and-braces for the "no copying UI text" behavior set up in
@@ -54,9 +55,21 @@ if ("serviceWorker" in navigator) {
 // here before App (and its getMe() session check) ever mounts, so
 // opening one never triggers a login prompt.
 const verifyMatch = window.location.hash.match(/^#\/verify-email\?token=(.+)$/);
+// Same reasoning as the verify link above: a reset link is followed by
+// someone who by definition can't log in, so it has to be handled
+// before App's session check ever runs.
+const resetMatch = window.location.hash.match(/^#\/reset-password\?token=(.+)$/);
 
 ReactDOM.createRoot(document.getElementById("root")).render(
-  <React.StrictMode>{verifyMatch ? <VerifyEmail token={decodeURIComponent(verifyMatch[1])} /> : <App />}</React.StrictMode>
+  <React.StrictMode>
+    {verifyMatch ? (
+      <VerifyEmail token={decodeURIComponent(verifyMatch[1])} />
+    ) : resetMatch ? (
+      <ResetPassword token={decodeURIComponent(resetMatch[1])} />
+    ) : (
+      <App />
+    )}
+  </React.StrictMode>
 );
 
 // Splash lives in index.html so it's visible before this file finishes

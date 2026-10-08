@@ -449,4 +449,96 @@ router.patch("/me", requireAuth, async (req, res) => {
   res.json(rows[0]);
 });
 
+// ===================================================================
+// Password reset
+//
+// This was missing entirely, which meant a forgotten password could
+// only be fixed with direct database access - not a position anyone
+// should be in, least of all from a phone.
+//
+// Same enumeration-safe shape as signup: the response never reveals
+// whether an address has an account. Unlike signup, though, a send
+// failure here is reported honestly, because "we couldn't email you"
+// and "that address has no account" are different problems and telling
+// someone to keep waiting for an email that was never sent is the worst
+// of both.
+// ===================================================================
+
+router.post("/forgot-password", authRateLimit({ max: 5, windowMinutes: 60 }), async (req, res) => {
+  const email = req.body?.email?.trim().toLowerCase();
+  if (!email) return res.status(400).json({ error: "enter the email address on the account" });
+
+  const GENERIC = "If that address has an account, a reset link is on its way. The link is valid for one hour.";
+  const { rows } = await pool.query(`SELECT id FROM users WHERE email = $1`, [email]);
+  if (rows.length === 0) {
+    // Deliberately the same latency and the same message as the success
+    // path, so neither the response nor its timing answers "does this
+    // address have an account".
+    await new Promise((r) => setTimeout(r, 180));
+    return res.json({ message: GENERIC });
+  }
+
+  const token = crypto.randomBytes(32).toString("base64url");
+  // Any earlier unused link for this account stops working the moment a
+  // new one is requested - otherwise every reset ever emailed stays live
+  // until it expires, and an old message forwarded or left in an inbox
+  // is as good as the newest one.
+  await pool.query(`UPDATE password_resets SET used_at = now() WHERE user_id = $1 AND used_at IS NULL`, [rows[0].id]);
+  await pool.query(`INSERT INTO password_resets (user_id, token_hash) VALUES ($1, $2)`, [rows[0].id, hashToken(token)]);
+
+  const appUrl = process.env.FRONTEND_URL?.trim();
+  const resetUrl = appUrl ? `${appUrl.replace(/\/$/, "")}/#/reset-password?token=${token}` : null;
+  const result = await sendAlertEmail({
+    to: email,
+    subject: "Reset your Starlink Monitor password",
+    text: resetUrl
+      ? `Open this link within the next hour to set a new password: ${resetUrl}\n\nIf you didn't ask for this, you can ignore this email - nothing has changed.`
+      : `Your password reset code (valid one hour): ${token}`,
+    actionUrl: resetUrl || undefined,
+    actionLabel: "Set a new password",
+  });
+
+  if (!result.sent) {
+    console.error("password reset email failed:", result.reason);
+    return res.status(502).json({ error: `couldn't send the reset email: ${result.reason}` });
+  }
+  res.json({ message: GENERIC });
+});
+
+router.post("/reset-password", authRateLimit({ max: 10, windowMinutes: 60 }), async (req, res) => {
+  const { token, password } = req.body || {};
+  if (!token || !password || password.length < 8) {
+    return res.status(400).json({ error: "a reset link and an 8+ character password are required" });
+  }
+
+  const { rows } = await pool.query(
+    `SELECT pr.id, pr.user_id FROM password_resets pr
+     WHERE pr.token_hash = $1 AND pr.used_at IS NULL AND pr.expires_at > now()`,
+    [hashToken(token)]
+  );
+  if (rows.length === 0) {
+    return res.status(400).json({ error: "that reset link has expired or already been used - request a new one" });
+  }
+
+  const hash = await bcrypt.hash(password, 12);
+  await pool.query(`UPDATE users SET password_hash = $1 WHERE id = $2`, [hash, rows[0].user_id]);
+  await pool.query(`UPDATE password_resets SET used_at = now() WHERE id = $1`, [rows[0].id]);
+
+  // Everything else that could be holding this account open is cleared:
+  // other live reset links, and every existing browser session. If the
+  // reason for the reset was that someone else got in, leaving their
+  // session alive would make the reset pointless.
+  await pool.query(`UPDATE password_resets SET used_at = now() WHERE user_id = $1 AND used_at IS NULL`, [rows[0].user_id]);
+  await pool.query(`DELETE FROM session WHERE sess::text LIKE '%' || $1 || '%'`, [rows[0].user_id]).catch(() => {});
+
+  const { rows: user } = await pool.query(`SELECT email FROM users WHERE id = $1`, [rows[0].user_id]);
+  await sendAlertEmail({
+    to: user[0]?.email,
+    subject: "Your Starlink Monitor password was changed",
+    text: "The password on your Starlink Monitor account was just reset. If that wasn't you, reset it again immediately - whoever did it has been signed out.",
+  }).catch(() => {});
+
+  res.json({ message: "Password updated. You can log in with it now." });
+});
+
 export default router;

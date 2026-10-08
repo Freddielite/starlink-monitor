@@ -33,6 +33,12 @@ if (process.env.NODE_ENV === "production" && !process.env.CRON_SECRET) {
       "add the same value to whatever calls this endpoint."
   );
 }
+if (process.env.TELEGRAM_BOT_TOKEN && !process.env.TELEGRAM_WEBHOOK_SECRET) {
+  console.warn(
+    "NOTE: TELEGRAM_WEBHOOK_SECRET is not set, so alert action buttons (Mark paid / Mute / Still in use) are " +
+      "switched off. Alerts still send. To enable them, set this to a random string and run `npm run telegram-webhook`."
+  );
+}
 if (process.env.NODE_ENV === "production" && !process.env.FRONTEND_URL) {
   console.error(
     "WARNING: FRONTEND_URL is not set. New signups can't complete - the confirmation email has no link to put the " +

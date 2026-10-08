@@ -3,6 +3,7 @@ import crypto from "node:crypto";
 import { pool } from "../db.js";
 import { runBillingSweep, runHardwareSweep, runIdleSweep, pruneHeartbeats } from "../lib/sweeps.js";
 import { runDigestSweep } from "../lib/digest.js";
+import { sendAlertEmail, mailerConfigured } from "../lib/mailer.js";
 
 const router = Router();
 
@@ -88,6 +89,48 @@ router.all("/tick", requireCronSecret, async (req, res) => {
   } finally {
     await releaseLock(holder);
   }
+});
+
+// Email diagnostic. Lives behind CRON_SECRET rather than a login,
+// because the exact moment you need it is when email is broken and you
+// therefore can't complete a signup or a password reset to get in -
+// requiring a session to debug the thing that blocks sessions is a
+// circle with no way out.
+//
+// Returns Brevo's literal answer rather than a friendly summary. The
+// whole point is to tell apart the four failures that look identical
+// from the outside: not configured, bad key (401), unverified sender
+// (400), and IP authorization (401 with a different message).
+//
+//   /api/cron/email-test?secret=YOUR_CRON_SECRET&to=you@example.com
+router.all("/email-test", requireCronSecret, async (req, res) => {
+  const to = (req.query.to || process.env.EMAIL_FROM || "").toString().trim();
+  const config = {
+    BREVO_API_KEY: process.env.BREVO_API_KEY ? `set (${process.env.BREVO_API_KEY.slice(0, 10)}…)` : "MISSING",
+    EMAIL_FROM: process.env.EMAIL_FROM || "MISSING",
+    EMAIL_FROM_NAME: process.env.EMAIL_FROM_NAME || "(default)",
+    FRONTEND_URL: process.env.FRONTEND_URL || "MISSING - signup and reset links will have nowhere to point",
+    mailerConfigured: mailerConfigured(),
+  };
+
+  if (!to) return res.json({ config, sent: false, reason: "pass ?to=an@address.com" });
+
+  const result = await sendAlertEmail({
+    to,
+    subject: "Starlink Monitor email test",
+    text: `This is a test from your Starlink Monitor backend at ${new Date().toISOString()}. If you're reading it, sending works and the problem is elsewhere.`,
+  });
+
+  res.json({
+    config,
+    to,
+    ...result,
+    hint: result.sent
+      ? "Brevo accepted it. If it never arrives, it's a delivery problem - check Brevo's Transactional logs and your spam folder."
+      : process.env.BREVO_API_KEY && process.env.EMAIL_FROM
+      ? "Brevo refused it. The reason above is verbatim from their API."
+      : "Nothing was attempted - the config above is incomplete. Set whichever shows MISSING.",
+  });
 });
 
 export default router;

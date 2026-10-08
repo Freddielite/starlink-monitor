@@ -8,6 +8,7 @@ import { runBillingSweep } from "../lib/sweeps.js";
 import { geocodeAddress, validateCoords } from "../lib/geocode.js";
 import { hashToken } from "../lib/apiTokens.js";
 import { parseRow, parseAccountRow, findInternalDuplicates } from "../lib/importKits.js";
+import { resyncBillingState, applyPayment, applyMarkSeen, applySnooze } from "../lib/kitActions.js";
 import {
   resolveThresholds,
   deriveBillingState,
@@ -75,41 +76,6 @@ async function orgDefaultsFor(kit) {
   if (!kit.organization_id) return null;
   const { rows } = await pool.query(`SELECT * FROM organizations WHERE id = $1`, [kit.organization_id]);
   return rows[0] || null;
-}
-
-// Rewrites billing_state from the kit's dates immediately after anything
-// that could have changed them, rather than waiting for the next cron
-// tick. Without this, recording a payment would leave a kit visibly
-// "Suspended" on the dashboard until the next sweep - which is both
-// wrong and the exact moment someone is looking at the screen to confirm
-// the payment landed.
-//
-// Note this deliberately does NOT touch billing_alerted_state: the sweep
-// owns alerting, and letting it notice the transition to 'active' on its
-// own is what produces the "paid up" recovery message.
-async function resyncBillingState(kitId, actorUserId = null) {
-  const { rows } = await pool.query(`SELECT * FROM kits WHERE id = $1`, [kitId]);
-  const kit = rows[0];
-  if (!kit) return null;
-  const org = await orgDefaultsFor(kit);
-  const thresholds = resolveThresholds(kit, org);
-  const next = deriveBillingState(kit, thresholds);
-  if (next !== kit.billing_state) {
-    const { rows: updated } = await pool.query(
-      `UPDATE kits SET billing_state = $1, billing_state_changed_at = now(), updated_at = now() WHERE id = $2 RETURNING *`,
-      [next, kitId]
-    );
-    await recordKitEvent(kitId, {
-      kind: "billing_state_changed",
-      severity: "info",
-      title: `Billing: ${BILLING_LABELS[kit.billing_state] || kit.billing_state} → ${BILLING_LABELS[next] || next}`,
-      detail: "Recalculated after a change to this kit's billing details.",
-      data: { from: kit.billing_state, to: next },
-      actorUserId,
-    });
-    return updated[0];
-  }
-  return kit;
 }
 
 function parseDate(value, field) {
@@ -415,49 +381,24 @@ router.post("/:id/payments", async (req, res) => {
 
   const paidAt = parseDate(b.paid_at, "payment date");
   if (paidAt.error) return res.status(400).json({ error: paidAt.error });
-  const when = paidAt.value || new Date();
-
-  // An explicit covers_until wins over the computed one - the cycle
-  // length is a default, not a rule, and part-payments or a client who
-  // pays for three months at once are both normal.
-  const explicitUntil = parseDate(b.covers_until, "covers until");
-  if (explicitUntil.error) return res.status(400).json({ error: explicitUntil.error });
-  const nextDue = explicitUntil.value || nextDueAfterPayment(kit, when);
-
-  const amount = parseNumberOrNull(b.amount);
+  const coversUntil = parseDate(b.covers_until, "covers until");
+  if (coversUntil.error) return res.status(400).json({ error: coversUntil.error });
 
   try {
-    const { rows } = await pool.query(
-      `INSERT INTO payments (kit_id, recorded_by, paid_at, amount, currency, method, reference, covers_until, note)
-       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9) RETURNING *`,
-      [
-        kit.id,
-        req.userId,
-        when,
-        amount,
-        b.currency?.trim() || kit.plan_currency || "NGN",
-        b.method?.trim() || null,
-        b.reference?.trim() || null,
-        nextDue,
-        b.note?.trim() || null,
-      ]
+    const result = await applyPayment(
+      kit,
+      {
+        amount: b.amount,
+        currency: b.currency,
+        method: b.method?.trim() || null,
+        reference: b.reference?.trim() || null,
+        note: b.note?.trim() || null,
+        paid_at: paidAt.value,
+        covers_until: coversUntil.value,
+      },
+      req.userId
     );
-
-    await pool.query(
-      `UPDATE kits SET last_paid_at = $1, next_due_at = $2, updated_at = now() WHERE id = $3`,
-      [when, nextDue, kit.id]
-    );
-
-    await recordKitEvent(kit.id, {
-      kind: "payment_recorded",
-      title: amount ? `Payment recorded: ${kit.plan_currency || ""} ${amount}`.trim() : "Payment recorded",
-      detail: `Covers until ${nextDue.toISOString().slice(0, 10)}${b.method ? ` · ${b.method}` : ""}.`,
-      data: { amount, method: b.method || null, covers_until: nextDue },
-      actorUserId: req.userId,
-    });
-
-    const synced = await resyncBillingState(kit.id, req.userId);
-    res.status(201).json({ payment: rows[0], kit: publicKit(synced) });
+    res.status(201).json({ payment: result.payment, kit: publicKit(result.kit) });
   } catch (err) {
     console.error(err);
     res.status(500).json({ error: "failed to record the payment" });
@@ -572,19 +513,8 @@ router.post("/:id/seen", async (req, res) => {
   if (!kit) return;
   const at = parseDate(req.body?.at, "date");
   if (at.error) return res.status(400).json({ error: at.error });
-  const when = at.value || new Date();
-
-  const { rows } = await pool.query(
-    `UPDATE kits SET last_active_at = $1, idle_alerted_at = NULL, updated_at = now() WHERE id = $2 RETURNING *`,
-    [when, kit.id]
-  );
-  await recordKitEvent(kit.id, {
-    kind: "marked_seen",
-    title: "Marked as in use",
-    detail: req.body?.note?.trim() || null,
-    actorUserId: req.userId,
-  });
-  res.json(publicKit(rows[0]));
+  const updated = await applyMarkSeen(kit, { at: at.value, note: req.body?.note?.trim() || null }, req.userId);
+  res.json(publicKit(updated));
 });
 
 router.post("/:id/snooze", async (req, res) => {
@@ -592,9 +522,8 @@ router.post("/:id/snooze", async (req, res) => {
   if (!kit) return;
   const minutes = Number(req.body?.minutes);
   if (!Number.isFinite(minutes) || minutes <= 0) return res.status(400).json({ error: "minutes has to be a positive number" });
-  const until = new Date(Date.now() + minutes * 60 * 1000);
-  const { rows } = await pool.query(`UPDATE kits SET snoozed_until = $1, updated_at = now() WHERE id = $2 RETURNING *`, [until, kit.id]);
-  res.json(publicKit(rows[0]));
+  const updated = await applySnooze(kit, minutes, req.userId);
+  res.json(publicKit(updated));
 });
 
 router.post("/:id/unsnooze", async (req, res) => {
@@ -932,6 +861,125 @@ router.post("/import", async (req, res) => {
   }
 
   res.json({ imported: created.length, updated: updated.length, summary, rows: plan });
+});
+
+// ===================================================================
+// Bulk actions
+// ===================================================================
+
+const BULK_ACTIONS = ["mark_paid", "mark_seen", "snooze", "unsnooze", "set_client", "set_organization", "cancel", "reinstate", "delete"];
+
+// One action across many kits. The alternative - the client looping over
+// the single-kit endpoints - would be dozens of round trips, and would
+// leave a half-applied selection behind the moment one of them failed
+// with no way for the user to tell which.
+//
+// Permissions are checked per kit rather than once for the batch,
+// because a selection can legitimately span personal kits and several
+// organizations with different roles in each. Kits the user can't manage
+// are reported as refused rather than silently dropped: a bulk action
+// that quietly does less than you asked is worse than one that tells you
+// it did.
+router.post("/bulk", async (req, res) => {
+  const { ids, action, payload = {} } = req.body || {};
+  if (!Array.isArray(ids) || ids.length === 0) return res.status(400).json({ error: "no kits selected" });
+  if (ids.length > 500) return res.status(400).json({ error: "that's more than 500 kits in one go - narrow the selection" });
+  if (!BULK_ACTIONS.includes(action)) return res.status(400).json({ error: `action has to be one of ${BULK_ACTIONS.join(", ")}` });
+
+  const { rows: kits } = await pool.query(
+    `SELECT * FROM kits WHERE id = ANY($1::uuid[])
+       AND (user_id = $2 OR organization_id IN (SELECT organization_id FROM organization_members WHERE user_id = $2))`,
+    [ids, req.userId]
+  );
+
+  const allowed = [];
+  const refused = [];
+  for (const kit of kits) {
+    const isCreator = kit.user_id === req.userId;
+    const isOrgAdmin = kit.organization_id && (await requireOrgRole(req.userId, kit.organization_id, "admin"));
+    if (isCreator || isOrgAdmin) allowed.push(kit);
+    else refused.push({ id: kit.id, name: kit.name, reason: "you don't have admin access on this kit's organization" });
+  }
+  // Ids that matched nothing at all - deleted by someone else since the
+  // page loaded, or simply not visible to this user.
+  const found = new Set(kits.map((k) => k.id));
+  for (const id of ids.filter((i) => !found.has(i))) refused.push({ id, reason: "not found" });
+
+  if (action === "set_organization" && payload.organization_id) {
+    const ok = await requireOrgRole(req.userId, payload.organization_id, "admin");
+    if (!ok) return res.status(403).json({ error: "you need admin access on the organization you're moving kits into" });
+  }
+  if (action === "snooze") {
+    const minutes = Number(payload.minutes);
+    if (!Number.isFinite(minutes) || minutes <= 0) return res.status(400).json({ error: "minutes has to be a positive number" });
+  }
+
+  const done = [];
+  const failed = [];
+  for (const kit of allowed) {
+    try {
+      switch (action) {
+        case "mark_paid": {
+          // No amount is passed: applyPayment falls back to each kit's
+          // own outstanding balance, then its plan price. A single
+          // figure across a mixed selection would be wrong for most of
+          // them, and these fleets are billed in several currencies at
+          // once.
+          const result = await applyPayment(kit, { method: payload.method || null, via: "bulk action" }, req.userId);
+          done.push({ id: kit.id, amount: result.amount, currency: result.currency });
+          break;
+        }
+        case "mark_seen":
+          await applyMarkSeen(kit, { via: "bulk action" }, req.userId);
+          done.push({ id: kit.id });
+          break;
+        case "snooze":
+          await applySnooze(kit, Number(payload.minutes), req.userId, "bulk action");
+          done.push({ id: kit.id });
+          break;
+        case "unsnooze":
+          await pool.query(`UPDATE kits SET snoozed_until = NULL, updated_at = now() WHERE id = $1`, [kit.id]);
+          done.push({ id: kit.id });
+          break;
+        case "set_client":
+          await pool.query(`UPDATE kits SET client_name = $1, updated_at = now() WHERE id = $2`, [payload.client_name?.trim() || null, kit.id]);
+          await recordKitEvent(kit.id, { kind: "kit_created", severity: "info", title: `Client set to ${payload.client_name?.trim() || "none"}`, actorUserId: req.userId });
+          done.push({ id: kit.id });
+          break;
+        case "set_organization":
+          await pool.query(`UPDATE kits SET organization_id = $1, updated_at = now() WHERE id = $2`, [payload.organization_id || null, kit.id]);
+          done.push({ id: kit.id });
+          break;
+        case "cancel":
+          await pool.query(
+            `UPDATE kits SET billing_state = 'cancelled', cancelled_at = now(), billing_state_changed_at = now(), updated_at = now() WHERE id = $1`,
+            [kit.id]
+          );
+          await recordKitEvent(kit.id, { kind: "billing_state_changed", severity: "medium", title: "Service cancelled", actorUserId: req.userId });
+          done.push({ id: kit.id });
+          break;
+        case "reinstate":
+          await pool.query(`UPDATE kits SET billing_state = 'active', cancelled_at = NULL, billing_state_changed_at = now(), updated_at = now() WHERE id = $1`, [kit.id]);
+          await resyncBillingState(kit.id, req.userId);
+          done.push({ id: kit.id });
+          break;
+        case "delete":
+          await pool.query(`DELETE FROM kits WHERE id = $1`, [kit.id]);
+          done.push({ id: kit.id });
+          break;
+      }
+    } catch (err) {
+      // Per-kit rather than all-or-nothing, unlike the import. An import
+      // is one document with one intent; a bulk action is N independent
+      // instructions, and rolling back 49 successful payments because
+      // the 50th kit hit a problem would be the wrong trade. Every
+      // failure is named so the user can retry just those.
+      console.error(`Bulk ${action} failed for ${kit.id}:`, err.message);
+      failed.push({ id: kit.id, name: kit.name, reason: err.message });
+    }
+  }
+
+  res.json({ action, done: done.length, results: done, refused, failed });
 });
 
 export default router;

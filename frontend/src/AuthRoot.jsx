@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { login, signup, verifyLoginTotp } from "./api.js";
+import { login, signup, verifyLoginTotp, forgotPassword } from "./api.js";
 import BrandMark from "./components/BrandMark.jsx";
 
 export default function AuthRoot({ onAuthed }) {
@@ -19,6 +19,10 @@ export default function AuthRoot({ onAuthed }) {
   // confirmation link is clicked), so this replaces the form with
   // "check your email" instead of calling onAuthed.
   const [signupMessage, setSignupMessage] = useState(null);
+  // "forgot" is a third mode alongside login/signup rather than a
+  // separate screen, so the existing email field and error handling are
+  // reused and there's one place that can be in a busy state.
+  const [resetMessage, setResetMessage] = useState(null);
 
   async function handleSubmit(e) {
     e.preventDefault();
@@ -29,6 +33,9 @@ export default function AuthRoot({ onAuthed }) {
         const result = await login({ email, password });
         if (result.requires_totp) setAwaitingTotp(true);
         else onAuthed(result);
+      } else if (mode === "forgot") {
+        const result = await forgotPassword(email);
+        setResetMessage(result.message);
       } else {
         const result = await signup({ email, password, signup_code: signupCode });
         setSignupMessage(result.message);
@@ -65,7 +72,14 @@ export default function AuthRoot({ onAuthed }) {
         </div>
         <div className="sl-auth__tagline">Payment, hardware and usage tracking for every Starlink kit you're responsible for.</div>
 
-        {signupMessage ? (
+        {resetMessage ? (
+          <>
+            <div className="sl-auth__tagline">{resetMessage}</div>
+            <button className="sl-btn" style={{ width: "100%" }} onClick={() => { setResetMessage(null); setMode("login"); }}>
+              Back to log in
+            </button>
+          </>
+        ) : signupMessage ? (
           <>
             <div className="sl-auth__tagline">{signupMessage}</div>
             <button
@@ -111,10 +125,14 @@ export default function AuthRoot({ onAuthed }) {
                 <label>Email</label>
                 <input type="email" value={email} onChange={(e) => setEmail(e.target.value)} required autoFocus />
               </div>
-              <div className="sl-field">
-                <label>Password</label>
-                <input type="password" value={password} onChange={(e) => setPassword(e.target.value)} required minLength={8} />
-              </div>
+              {/* No password field when asking for a reset link - the
+                  whole point is that you don't have one. */}
+              {mode !== "forgot" && (
+                <div className="sl-field">
+                  <label>Password</label>
+                  <input type="password" value={password} onChange={(e) => setPassword(e.target.value)} required minLength={8} />
+                </div>
+              )}
               {mode === "signup" && (
                 <div className="sl-field">
                   <label>Signup code</label>
@@ -123,15 +141,24 @@ export default function AuthRoot({ onAuthed }) {
               )}
               {error && <div className="sl-error">{error}</div>}
               <button className="sl-btn" type="submit" disabled={busy} style={{ width: "100%" }}>
-                {busy ? "Working..." : mode === "login" ? "Log in" : "Create account"}
+                {busy ? "Working..." : mode === "login" ? "Log in" : mode === "forgot" ? "Send reset link" : "Create account"}
               </button>
             </form>
 
             <div className="sl-auth__switch">
-              {mode === "login" ? (
-                <>No account yet? <button onClick={() => setMode("signup")}>Sign up</button></>
-              ) : (
-                <>Already have an account? <button onClick={() => setMode("login")}>Log in</button></>
+              {mode === "login" && (
+                <>
+                  <div>No account yet? <button onClick={() => { setMode("signup"); setError(null); }}>Sign up</button></div>
+                  <div style={{ marginTop: 8 }}>
+                    <button onClick={() => { setMode("forgot"); setError(null); }}>Forgotten your password?</button>
+                  </div>
+                </>
+              )}
+              {mode === "signup" && (
+                <>Already have an account? <button onClick={() => { setMode("login"); setError(null); }}>Log in</button></>
+              )}
+              {mode === "forgot" && (
+                <>Remembered it? <button onClick={() => { setMode("login"); setError(null); }}>Back to log in</button></>
               )}
             </div>
           </>

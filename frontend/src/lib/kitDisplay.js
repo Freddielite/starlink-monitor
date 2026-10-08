@@ -134,3 +134,30 @@ export function urgencyRank(kit) {
   if (base >= 4 && isIdle(kit)) return 3;
   return base;
 }
+
+// Totals owed, grouped by currency.
+//
+// Deliberately NOT summed into one figure: these fleets carry balances
+// in several currencies at once, and adding NGN to EUR would produce a
+// confident number that means nothing. Converting would need a live
+// rate, would be wrong by the time anyone read it, and would hide which
+// currency the money is actually owed in - which is what determines how
+// it gets collected.
+export function outstandingByCurrency(kits) {
+  const totals = new Map();
+  for (const kit of kits) {
+    const amount = Number(kit.outstanding_amount);
+    if (!Number.isFinite(amount) || amount === 0) continue;
+    const currency = kit.outstanding_currency || kit.plan_currency || "—";
+    const entry = totals.get(currency) || { currency, total: 0, kits: 0 };
+    entry.total += amount;
+    entry.kits += 1;
+    totals.set(currency, entry);
+  }
+  // Largest first, so the currency most of the money is in leads.
+  return [...totals.values()].sort((a, b) => b.total - a.total);
+}
+
+export function formatTotal(entry) {
+  return `${entry.currency} ${entry.total.toLocaleString(undefined, { maximumFractionDigits: 2 })}`;
+}

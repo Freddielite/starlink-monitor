@@ -188,6 +188,20 @@ export async function migrate() {
     );
     CREATE INDEX IF NOT EXISTS idx_auth_attempts_bucket_time ON auth_attempts(bucket, attempted_at DESC);
 
+    -- Password resets. Same shape as pending_signups: only a hash of the
+    -- token is stored, so a database dump can't be used to seize
+    -- accounts, and it expires on its own.
+    CREATE TABLE IF NOT EXISTS password_resets (
+      id          UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+      user_id     UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+      token_hash  TEXT NOT NULL,
+      created_at  TIMESTAMPTZ NOT NULL DEFAULT now(),
+      expires_at  TIMESTAMPTZ NOT NULL DEFAULT now() + interval '1 hour',
+      used_at     TIMESTAMPTZ
+    );
+    CREATE INDEX IF NOT EXISTS idx_password_resets_token ON password_resets(token_hash);
+    CREATE INDEX IF NOT EXISTS idx_password_resets_user ON password_resets(user_id);
+
     CREATE TABLE IF NOT EXISTS pending_signups (
       id             UUID PRIMARY KEY DEFAULT gen_random_uuid(),
       email          TEXT NOT NULL UNIQUE,

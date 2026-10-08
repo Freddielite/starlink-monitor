@@ -49,6 +49,7 @@ queries keep the Supabase project from idling out.
 | `BREVO_API_KEY` / `EMAIL_FROM` / `EMAIL_FROM_NAME` | For email | Free Brevo key (300/day) plus a sender verified in their dashboard. HTTP API, not SMTP - Render's free tier blocks outbound SMTP ports entirely |
 | `VAPID_PUBLIC_KEY` / `VAPID_PRIVATE_KEY` / `VAPID_SUBJECT` | For push | Generate with `npm run gen-vapid` in `backend/` |
 | `TELEGRAM_BOT_TOKEN` | For Telegram | One bot for the instance, from [@BotFather](https://t.me/BotFather) |
+| `TELEGRAM_WEBHOOK_SECRET` | For alert buttons | Random string. Without it the action buttons are switched off entirely and every callback is refused - that's the safe default, not a broken one. After setting it, run `BACKEND_URL=https://... npm run telegram-webhook` once |
 | `TELEGRAM_CHAT_ID` | Optional | Hardcodes one destination chat for the whole deployment - simplest setup for a single operator. Wins over per-user chat IDs if set |
 | `NOMINATIM_CONTACT_EMAIL` | Recommended | Goes in the User-Agent on geocoding requests. Nominatim's usage policy asks for it, and an anonymous heavy user is the one most likely to get IP-blocked |
 
@@ -117,6 +118,39 @@ and surfaced in the UI, so a pin nobody has verified is visibly distinct
 from one someone set deliberately. Given how weak Nominatim is on
 informal Nigerian addresses, shipping it *without* the manual path would
 have produced a map quietly full of city centroids.
+
+## Diagnosing email
+
+Email is the single most failure-prone part of this deployment, and every
+failure looks identical from the signup screen. There's an endpoint that
+tells you which one you've hit:
+
+```
+https://your-backend.onrender.com/api/cron/email-test?secret=YOUR_CRON_SECRET&to=you@example.com
+```
+
+It's behind `CRON_SECRET` rather than a login on purpose - the moment you
+need it is the moment email is broken and you therefore can't complete a
+signup or a reset to get in. Requiring a session to debug the thing that
+blocks sessions is a circle with no exit.
+
+It returns which variables are set, and Brevo's literal response. The
+four failures that are indistinguishable from the UI:
+
+| What you see | What it means |
+|---|---|
+| `BREVO_API_KEY: MISSING` | Never configured on this service |
+| `401` with "unrecognised IP address" | Brevo's IP authorisation is on - turn it off for API keys |
+| `401` otherwise | The key is wrong or was truncated on paste |
+| `400` naming the sender | `EMAIL_FROM` isn't a verified sender in Brevo |
+| `sent: true` but nothing arrives | Brevo accepted it; it's a delivery problem - check their Transactional logs and your spam folder |
+
+**A signup that reports success but sends nothing is usually not a
+failure at all.** If the address already has an account, no confirmation
+link is sent - a "someone tried to sign up with your email" notice goes
+instead, and the response is deliberately the same either way so the form
+can't be used to discover which addresses are registered. Try logging in
+before debugging email.
 
 ## Known limitations, stated plainly
 
@@ -206,6 +240,36 @@ have produced a map quietly full of city centroids.
   thousands of kits. Past that, the right move is a server-side
   `GET /kits?q=&page=` for the list with the counts and map points
   served separately - not paging the existing endpoint.
+- **Telegram action buttons are off unless `TELEGRAM_WEBHOOK_SECRET` is
+  set.** Buttons are only attached to alerts when it is, so the app never
+  shows a control that silently does nothing. Hardware alerts
+  deliberately get no buttons: "the dish is down" isn't resolved by
+  tapping anything, and offering a mute button would train people to
+  dismiss the alerts that matter most.
+- **Bulk actions are per-kit, not all-or-nothing** (unlike the import).
+  An import is one document with one intent; a bulk action is N
+  independent instructions, and rolling back 49 successful payments
+  because the 50th hit a problem is the wrong trade. Refusals and
+  failures are named in the response so the user can retry just those.
+- **Bulk "mark paid" credits each kit its own balance**, falling back to
+  its plan amount - never one figure across the selection, which would be
+  wrong for most kits in a fleet billed in three currencies.
+- **Outstanding totals are never summed across currencies.** Adding NGN
+  to EUR would produce a confident number that means nothing, and
+  converting would need a live rate that's stale by the time anyone reads
+  it. They're listed separately, largest first.
+- **Password reset exists now** (`/auth/forgot-password`,
+  `/auth/reset-password`). It was missing entirely, which meant a
+  forgotten password could only be fixed with direct database access.
+  Tokens are hashed, expire in an hour, are single-use, and requesting a
+  new one voids any outstanding link. Completing a reset also signs out
+  every existing session - if the reason for the reset was that someone
+  else got in, leaving their session alive would make it pointless.
+- **Reset deliberately reports send failures honestly** while still not
+  revealing whether an address has an account. "We couldn't email you"
+  and "that address has no account" are different problems, and telling
+  someone to keep waiting for an email that was never sent is the worst
+  of both.
 - **Org-level custom domain is a note to yourself, not a feature.**
   Carried over from Pulse: the field records what you'd need to set up
   (a CNAME plus host routing/TLS), it doesn't do any of it.
@@ -303,6 +367,31 @@ Against the real 153-row operator spreadsheet:
 - Simulated next-month sheet where one client paid and one unverifiable
   account resolved: balance cleared to empty, condition cleared, still
   141 kits.
+
+Bulk actions and money totals, against the 141 imported kits:
+
+- Fleet totals computed per currency: NGN 1,954,600 across 42 kits,
+  EUR 2,526 across 31, HUF 186,000 across 5.
+- Bulk "mark paid" on 5 kits credited each its own amount and currency
+  (NGN 57,000 / EUR 53 / NGN 28,500 / NGN 29,000 / EUR 53), cleared each
+  balance, advanced each due date by its own cycle, and wrote a payment
+  log row per kit. Totals afterwards dropped by exactly those figures.
+- A non-existent id mixed into a selection was reported as refused
+  rather than silently skipped.
+- An unrecognised action name was rejected outright.
+- Bulk set-client grouped 3 kits under a new client name.
+
+Telegram action buttons - full authorisation matrix, each verified to
+write nothing unless authorised:
+
+- Wrong secret token → refused.
+- Missing secret token → refused.
+- Valid secret but a chat not linked to any account → refused.
+- Valid secret from a linked chat → payment recorded, timeline entry
+  written with "via Telegram", due date advanced.
+- The "still in use" verb recorded a marked-seen event the same way.
+- All four return HTTP 200, because Telegram retries any non-2xx and a
+  deliberately rejected call shouldn't be replayed forever.
 
 Search and pagination, against those same 141 imported kits:
 

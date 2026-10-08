@@ -15,6 +15,18 @@
 const API_ROOT = "https://api.brevo.com/v3/smtp/email";
 const REQUEST_TIMEOUT_MS = 10000;
 
+// Whether this deployment can send at all. Both halves are required and
+// they fail differently - a missing key is a 401 from Brevo, a missing
+// sender is a 400 - so they're reported separately rather than as one
+// boolean.
+export function mailerConfigured() {
+  return {
+    hasApiKey: !!process.env.BREVO_API_KEY,
+    hasSender: !!process.env.EMAIL_FROM,
+    ready: !!process.env.BREVO_API_KEY && !!process.env.EMAIL_FROM,
+  };
+}
+
 export async function sendAlertEmail({ to, subject, text, actionUrl, actionLabel }) {
   const apiKey = process.env.BREVO_API_KEY;
   const fromEmail = process.env.EMAIL_FROM;

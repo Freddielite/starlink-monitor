@@ -2373,3 +2373,162 @@ a {
     width: 100%;
   }
 }
+
+/* ---------- Outstanding money ---------- */
+
+.sl-owed {
+  margin-bottom: 18px;
+}
+
+.sl-owed__label {
+  font-size: 10px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--ink-faint);
+  margin-bottom: 10px;
+}
+
+.sl-owed__totals {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px 28px;
+}
+
+.sl-owed__entry {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.sl-owed__amount {
+  font-family: var(--font-display);
+  font-weight: 600;
+  font-size: 22px;
+  /* Red, because every figure here is money that hasn't arrived. It's
+     the one number on this screen that's a problem by definition. */
+  color: var(--alert);
+}
+
+.sl-owed__kits {
+  font-size: 11.5px;
+  color: var(--ink-faint);
+}
+
+.sl-owed__filtered {
+  margin-top: 12px;
+  padding-top: 10px;
+  border-top: 1px solid var(--panel-border);
+  font-size: 12px;
+  color: var(--ink-dim);
+}
+
+/* ---------- Bulk selection ---------- */
+
+.sl-selectable-card {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  cursor: pointer;
+}
+
+.sl-selectable-card__body {
+  flex: 1;
+  min-width: 0;
+  /* The card inside is a full component with its own click handler;
+     letting it swallow the tap would mean only the checkbox selects. */
+  pointer-events: none;
+}
+
+.sl-selectable-card--on .sl-panel {
+  border-color: var(--signal);
+  background: var(--signal-dim);
+}
+
+.sl-checkbox {
+  flex: 0 0 auto;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 24px;
+  height: 24px;
+  border: 1.5px solid var(--panel-border);
+  border-radius: 7px;
+  color: var(--bg);
+  transition: background 0.12s ease, border-color 0.12s ease;
+}
+
+.sl-checkbox--on {
+  background: var(--signal);
+  border-color: var(--signal);
+}
+
+.sl-checkbox svg {
+  width: 14px;
+  height: 14px;
+}
+
+/* Fixed above the tab bar rather than sitting at the end of the list:
+   the actions have to stay reachable while scrolling through a long
+   selection, and a bar you have to scroll to the bottom to find is a
+   bar people don't use. */
+.sl-bulkbar {
+  position: fixed;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  z-index: 90;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 14px;
+  flex-wrap: wrap;
+  padding: 12px 18px calc(12px + env(safe-area-inset-bottom, 0px));
+  background: rgba(13, 19, 28, 0.94);
+  backdrop-filter: blur(14px);
+  -webkit-backdrop-filter: blur(14px);
+  border-top: 1px solid var(--panel-border);
+}
+
+.sl-shell--with-tabbar .sl-bulkbar {
+  /* Sits above the tab bar on mobile rather than over it - the nav stays
+     usable, so leaving selection mode never requires finding a
+     particular button first. */
+  bottom: calc(58px + env(safe-area-inset-bottom, 0px));
+  padding-bottom: 12px;
+}
+
+.sl-bulkbar__count {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  font-size: 12.5px;
+  color: var(--ink-dim);
+  white-space: nowrap;
+}
+
+.sl-bulkbar__actions {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+@media (max-width: 620px) {
+  .sl-bulkbar {
+    flex-direction: column;
+    align-items: stretch;
+    gap: 10px;
+  }
+
+  .sl-bulkbar__actions {
+    /* Scrolls sideways rather than wrapping to three rows and eating
+       half the screen. */
+    flex-wrap: nowrap;
+    overflow-x: auto;
+    padding-bottom: 2px;
+    -webkit-overflow-scrolling: touch;
+  }
+
+  .sl-bulkbar__actions .sl-btn {
+    flex: 0 0 auto;
+  }
+}

@@ -1,7 +1,7 @@
 import { pool } from "../db.js";
 import { sendPushToUser } from "./webPush.js";
 import { sendAlertEmail } from "./mailer.js";
-import { sendTelegramMessage, resolveChatId } from "./telegram.js";
+import { sendTelegramMessage, resolveChatId, kitActionKeyboard } from "./telegram.js";
 import { sendWebhookAlert } from "./webhook.js";
 import { wantsNotification } from "./notificationPrefs.js";
 import { getNotifiableUsers } from "./orgAccess.js";
@@ -372,6 +372,19 @@ function whereLabel(kit) {
   return [kit.city, kit.region].filter(Boolean).join(", ");
 }
 
+// Which alerts get action buttons, and which. Only where a single tap
+// is a complete, correct answer: a billing alert is answered by
+// recording the payment, an idle alert by confirming the kit is in use.
+// Hardware alerts get none - "the dish is down" isn't resolved by
+// tapping anything, and offering a button that only mutes the problem
+// would train people to dismiss the alerts that matter most.
+const ALERT_BUTTONS = {
+  expiring: [{ label: "✅ Mark paid", action: "paid" }, { label: "💤 Mute 3d", action: "snooze" }],
+  grace: [{ label: "✅ Mark paid", action: "paid" }, { label: "💤 Mute 3d", action: "snooze" }],
+  suspended: [{ label: "✅ Mark paid", action: "paid" }, { label: "💤 Mute 3d", action: "snooze" }],
+  idle: [{ label: "👀 Still in use", action: "seen" }, { label: "💤 Mute 3d", action: "snooze" }],
+};
+
 async function fanOut(kit, { eventKey, emoji, title, body, severity, webhookEvent }) {
   const notifiable = await getNotifiableUsers(kit);
   const where = whereLabel(kit);
@@ -382,7 +395,16 @@ async function fanOut(kit, { eventKey, emoji, title, body, severity, webhookEven
     }
     await sendAlertEmail({ to: user.alert_email, subject: `Starlink Monitor: ${title}`, text: context });
     if (wantsNotification(user, "telegram", eventKey)) {
-      await sendTelegramMessage({ chatId: resolveChatId(user), text: `${emoji} ${title}\n${context}` });
+      const actions = ALERT_BUTTONS[eventKey];
+      await sendTelegramMessage({
+        chatId: resolveChatId(user),
+        text: `${emoji} ${title}\n${context}`,
+        // Buttons only where the webhook is actually wired up. Without
+        // TELEGRAM_WEBHOOK_SECRET set, every callback is rejected - so
+        // showing buttons would be offering a control that silently
+        // does nothing.
+        replyMarkup: actions && process.env.TELEGRAM_WEBHOOK_SECRET ? kitActionKeyboard(kit.id, actions) : null,
+      });
     }
     if (wantsNotification(user, "webhook", eventKey)) {
       await sendWebhookAlert(user.webhook_url, { event: webhookEvent, severity, title, body: context, kit });

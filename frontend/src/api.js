@@ -38,6 +38,8 @@ export const login = (payload) => apiFetch("/auth/login", { method: "POST", body
 export const logout = () => apiFetch("/auth/logout", { method: "POST" });
 export const getMe = () => apiFetch("/auth/me");
 export const updateMe = (payload) => apiFetch("/auth/me", { method: "PATCH", body: JSON.stringify(payload) });
+export const forgotPassword = (email) => apiFetch("/auth/forgot-password", { method: "POST", body: JSON.stringify({ email }) });
+export const resetPassword = (token, password) => apiFetch("/auth/reset-password", { method: "POST", body: JSON.stringify({ token, password }) });
 export const changePassword = (payload) => apiFetch("/auth/change-password", { method: "POST", body: JSON.stringify(payload) });
 export const verifyLoginTotp = (payload) => apiFetch("/auth/2fa/verify-login", { method: "POST", body: JSON.stringify(payload) });
 export const setup2fa = () => apiFetch("/auth/2fa/setup", { method: "POST" });
@@ -50,6 +52,11 @@ export const getKit = (id) => apiFetch(`/kits/${id}`);
 export const createKit = (payload) => apiFetch("/kits", { method: "POST", body: JSON.stringify(payload) });
 export const updateKit = (id, payload) => apiFetch(`/kits/${id}`, { method: "PATCH", body: JSON.stringify(payload) });
 export const deleteKit = (id) => apiFetch(`/kits/${id}`, { method: "DELETE" });
+export const bulkKitAction = (ids, action, payload = {}) =>
+  // Long timeout: a bulk payment across a large selection runs a handful
+  // of writes per kit, and timing out client-side mid-run would leave
+  // the user unsure how much of it landed.
+  apiFetch("/kits/bulk", { method: "POST", body: JSON.stringify({ ids, action, payload }), timeoutMs: 120000 });
 export const refreshKits = () => apiFetch("/kits/refresh", { method: "POST", timeoutMs: 40000 });
 // A few hundred rows plus a full per-row report back. Longer timeout than
 // a normal write because the commit path runs a billing resync per kit.
